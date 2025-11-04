@@ -25,6 +25,10 @@ function App({ Component, pageProps }: AppProps) {
     if (savedTheme) {
       setThemeMode(savedTheme);
     }
+
+    // Note: We're not preventing default drag/drop at window level
+    // because it blocks access to dataTransfer.files in React handlers
+    // Users should drop files only in the designated drop zones
   }, []);
 
   const toggleTheme = () => {

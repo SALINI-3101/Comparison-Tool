@@ -52,6 +52,18 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
   }, [acceptedTypes]);
 
   const handleFile = useCallback((file: File) => {
+    // Check file size limit (2MB = 2 * 1024 * 1024 bytes)
+    const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+    if (file.size > MAX_FILE_SIZE) {
+      const errorMessage = `File size exceeds 2MB limit. File size: ${formatFileSize(file.size)}`;
+      if (onError) {
+        onError(errorMessage);
+      } else {
+        alert(errorMessage);
+      }
+      return;
+    }
+
     if (!validateFile(file)) {
       const errorMessage = `Please upload a valid file type: ${acceptedTypes.join(', ')}`;
       if (onError) {
@@ -65,6 +77,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
+
       const metadata: FileMetadata = {
         name: file.name,
         size: file.size,
@@ -125,6 +138,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
+          data-drop-zone="true"
         >
           <input
             type="file"
@@ -141,7 +155,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
                 <>
                   📁 Drag & drop file here or <span style={{ color: '#9333ea', textDecoration: 'underline' }}>browse</span>
                   <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.7 }}>
-                    Supported: {acceptedTypes.join(', ')}
+                    Supported: {acceptedTypes.join(', ')} (Max: 2MB)
                   </div>
                 </>
               )}

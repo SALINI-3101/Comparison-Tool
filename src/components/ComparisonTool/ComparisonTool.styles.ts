@@ -16,6 +16,10 @@ export const Header = styled.header`
   @media (max-width: 768px) {
     padding: 32px 16px;
   }
+
+  @media (max-width: 480px) {
+    padding: 24px 12px;
+  }
 `;
 
 export const HeaderContent = styled.div`
@@ -55,6 +59,15 @@ export const Logo = styled.div`
       height: 24px;
     }
   }
+
+  @media (max-width: 400px) {
+    padding: 8px;
+
+    svg {
+      width: 20px;
+      height: 20px;
+    }
+  }
 `;
 
 export const HeaderText = styled.div`
@@ -75,6 +88,11 @@ export const Title = styled.h1`
     font-size: 20px;
     margin: 0 0 4px 0;
   }
+
+  @media (max-width: 400px) {
+    font-size: 16px;
+    margin: 0 0 2px 0;
+  }
 `;
 
 export const Subtitle = styled.p`
@@ -84,6 +102,10 @@ export const Subtitle = styled.p`
 
   @media (max-width: 768px) {
     font-size: 12px;
+  }
+
+  @media (max-width: 400px) {
+    font-size: 10px;
   }
 `;
 
@@ -163,6 +185,7 @@ export const ClearButton = styled.button`
   white-space: nowrap;
   transition: all 0.2s ease;
   box-shadow: ${({ theme }) => theme.shadows.sm};
+  flex-shrink: 0;
 
   &:hover {
     background: #7c3aed;
@@ -179,11 +202,22 @@ export const ClearButton = styled.button`
     height: 18px;
   }
 
-  @media (max-width: 768px) {
+  @media (max-width: 1024px) {
     padding: 10px 24px;
     font-size: 14px;
     width: 100%;
     justify-content: center;
+  }
+
+  @media (max-width: 480px) {
+    padding: 8px 16px;
+    font-size: 13px;
+    gap: 6px;
+
+    svg {
+      width: 16px;
+      height: 16px;
+    }
   }
 `;
 
@@ -198,6 +232,16 @@ export const Content = styled.main`
     margin: -24px auto 0;
     padding: 0 16px 32px;
   }
+
+  @media (max-width: 480px) {
+    margin: -20px auto 0;
+    padding: 0 12px 24px;
+  }
+
+  @media (max-width: 400px) {
+    margin: -16px auto 0;
+    padding: 0 8px 20px;
+  }
 `;
 
 export const Card = styled.div`
@@ -210,6 +254,16 @@ export const Card = styled.div`
   @media (max-width: 768px) {
     padding: 20px;
     border-radius: 12px;
+  }
+
+  @media (max-width: 480px) {
+    padding: 16px;
+    border-radius: 8px;
+  }
+
+  @media (max-width: 400px) {
+    padding: 12px;
+    border-radius: 8px;
   }
 `;
 
@@ -237,6 +291,10 @@ export const TabsWrapper = styled.div`
 
 export const InputSection = styled.section`
   margin-bottom: 24px;
+
+  @media (max-width: 768px) {
+    margin-bottom: 16px;
+  }
 `;
 
 export const SectionTitle = styled.h2`
@@ -245,6 +303,11 @@ export const SectionTitle = styled.h2`
   color: ${({ theme }) => theme.colors.text};
   margin: 0 0 16px 0;
   transition: color 0.3s ease;
+
+  @media (max-width: 768px) {
+    font-size: 14px;
+    margin: 0 0 12px 0;
+  }
 `;
 
 export const OptionsRow = styled.div`
@@ -252,9 +315,16 @@ export const OptionsRow = styled.div`
   flex-wrap: wrap;
   gap: 24px;
   margin-bottom: 24px;
+  align-items: center;
 
   @media (max-width: 768px) {
-    gap: 16px;
+    gap: 12px;
+    row-gap: 16px;
+  }
+
+  @media (max-width: 480px) {
+    gap: 8px;
+    row-gap: 12px;
   }
 `;
 
@@ -284,6 +354,7 @@ export const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' }>
   gap: 8px;
   transition: all 0.2s ease;
   box-shadow: ${({ theme }) => theme.shadows.sm};
+  white-space: nowrap;
 
   &:hover {
     transform: translateY(-2px);
@@ -300,10 +371,21 @@ export const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' }>
   }
 
   @media (max-width: 768px) {
-    padding: 10px 24px;
-    font-size: 14px;
+    padding: 10px 20px;
+    font-size: 13px;
     width: 100%;
     justify-content: center;
+  }
+
+  @media (max-width: 480px) {
+    padding: 8px 16px;
+    font-size: 12px;
+    gap: 6px;
+
+    svg {
+      width: 16px;
+      height: 16px;
+    }
   }
 `;
 
@@ -315,5 +397,21 @@ export const ButtonRow = styled.div`
 
   @media (max-width: 768px) {
     flex-direction: column-reverse;
+  }
+`;
+
+export const ValidateButtonGroup = styled.div`
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  @media (max-width: 480px) {
+    gap: 6px;
   }
 `;

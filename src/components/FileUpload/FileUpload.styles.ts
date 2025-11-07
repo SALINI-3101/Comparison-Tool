@@ -36,15 +36,27 @@ export const FileInfo = styled.div`
   border-radius: ${({ theme }) => theme.radii.md};
   font-size: 13px;
   transition: all 0.3s ease;
+  flex-wrap: wrap;
+
+  @media (max-width: 768px) {
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
 `;
 
 export const FileInfoItem = styled.div`
   color: ${({ theme }) => theme.colors.text};
   transition: color 0.3s ease;
+  word-break: break-word;
 
   strong {
     font-weight: 600;
     margin-right: 6px;
+  }
+
+  @media (max-width: 768px) {
+    font-size: 11px;
   }
 `;
 

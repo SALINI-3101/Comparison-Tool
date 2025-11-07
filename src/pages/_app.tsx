@@ -16,15 +16,18 @@ export const ThemeContext = createContext<{
 });
 
 function App({ Component, pageProps }: AppProps) {
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
-  const [mounted, setMounted] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    // Try to get theme from localStorage during initial render
+    if (typeof window !== 'undefined') {
+      const savedTheme = localStorage.getItem('theme') as ThemeMode | null;
+      return savedTheme || 'light';
+    }
+    return 'light';
+  });
 
   useEffect(() => {
-    setMounted(true);
-    const savedTheme = localStorage.getItem('theme') as ThemeMode | null;
-    if (savedTheme) {
-      setThemeMode(savedTheme);
-    }
+    // Mark app as hydrated to prevent FOUC
+    document.getElementById('__next')?.classList.add('hydrated');
 
     // Note: We're not preventing default drag/drop at window level
     // because it blocks access to dataTransfer.files in React handlers
@@ -36,10 +39,6 @@ function App({ Component, pageProps }: AppProps) {
     setThemeMode(newTheme);
     localStorage.setItem('theme', newTheme);
   };
-
-  if (!mounted) {
-    return null;
-  }
 
   const currentTheme = themeMode === 'light' ? lightTheme : darkTheme;
 

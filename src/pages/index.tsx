@@ -27,6 +27,7 @@ import {
   OptionsRow,
   DualEditorContainer,
   ActionButton,
+  ValidateButtonGroup,
 } from '@/components/ComparisonTool';
 import { ThemeContext } from './_app';
 import {
@@ -410,9 +411,9 @@ export default function ComparisonTool() {
       label: 'JSON Validate',
       content: (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <SectionTitle style={{ margin: 0 }}>Input Content</SectionTitle>
-            <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <SectionTitle style={{ margin: 0, paddingTop: '8px' }}>Input Content</SectionTitle>
+            <ValidateButtonGroup>
               <ActionButton variant="primary" onClick={handleValidateJSON}>
                 <PlayIcon />
                 Validate
@@ -425,7 +426,7 @@ export default function ComparisonTool() {
                 <RefreshIcon />
                 Reset
               </ActionButton>
-            </div>
+            </ValidateButtonGroup>
           </div>
           <InputSection>
             <FileUpload
@@ -458,7 +459,7 @@ export default function ComparisonTool() {
               <Toggle label="Ignore Key Order" checked={ignoreKeyOrder} onChange={setIgnoreKeyOrder} />
               <Toggle label="Ignore Array Order" checked={ignoreArrayOrder} onChange={setIgnoreArrayOrder} />
             </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <ValidateButtonGroup>
               <ActionButton variant="primary" onClick={handleCompareJSON}>
                 <CompareIcon />
                 Compare
@@ -467,7 +468,7 @@ export default function ComparisonTool() {
                 <RefreshIcon />
                 Reset
               </ActionButton>
-            </div>
+            </ValidateButtonGroup>
           </OptionsRow>
           <InputSection>
             <SectionTitle>Input Content</SectionTitle>
@@ -515,9 +516,9 @@ export default function ComparisonTool() {
       label: 'XML Validate',
       content: (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <SectionTitle style={{ margin: 0 }}>Input Content</SectionTitle>
-            <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <SectionTitle style={{ margin: 0, paddingTop: '8px' }}>Input Content</SectionTitle>
+            <ValidateButtonGroup>
               <ActionButton variant="primary" onClick={handleValidateXML}>
                 <PlayIcon />
                 Validate
@@ -530,7 +531,7 @@ export default function ComparisonTool() {
                 <RefreshIcon />
                 Reset
               </ActionButton>
-            </div>
+            </ValidateButtonGroup>
           </div>
           <InputSection>
             <FileUpload
@@ -562,7 +563,7 @@ export default function ComparisonTool() {
               <Toggle label="Case Sensitive" checked={caseSensitive} onChange={setCaseSensitive} />
               <Toggle label="Ignore Attribute Order" checked={ignoreAttributeOrder} onChange={setIgnoreAttributeOrder} />
             </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <ValidateButtonGroup>
               <ActionButton variant="primary" onClick={handleCompareXML}>
                 <CompareIcon />
                 Compare
@@ -571,7 +572,7 @@ export default function ComparisonTool() {
                 <RefreshIcon />
                 Reset
               </ActionButton>
-            </div>
+            </ValidateButtonGroup>
           </OptionsRow>
           <InputSection>
             <SectionTitle>Input Content</SectionTitle>
@@ -624,7 +625,7 @@ export default function ComparisonTool() {
               <Toggle label="Ignore Whitespace" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} />
               <Toggle label="Case Sensitive" checked={caseSensitive} onChange={setCaseSensitive} />
             </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <ValidateButtonGroup>
               <ActionButton variant="primary" onClick={handleCompareText}>
                 <CompareIcon />
                 Compare
@@ -633,7 +634,7 @@ export default function ComparisonTool() {
                 <RefreshIcon />
                 Reset
               </ActionButton>
-            </div>
+            </ValidateButtonGroup>
           </OptionsRow>
           <InputSection>
             <SectionTitle>Input Content</SectionTitle>
@@ -683,6 +684,7 @@ export default function ComparisonTool() {
       <Head>
         <title>Diff & Validate - Comparison and Validation Tool</title>
         <meta name="description" content="Compare and validate JSON, XML, and text files easily" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
       </Head>
       <PageContainer>
         <Header>

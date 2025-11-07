@@ -5,6 +5,7 @@ import {
   ResultsBody,
   DifferenceItem,
   DifferencePath,
+  DifferenceTypeBadge,
   DifferenceValues,
   DifferenceValue,
   ValueLabel,
@@ -106,17 +107,38 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, co
                   return JSON.stringify(value, null, 2);
                 };
 
+                // Check if the value contains HTML markers (<mark>, <div>, <span> tags)
+                const hasHTMLMarkers = (value: unknown) => {
+                  return typeof value === 'string' && (value.includes('<mark>') || value.includes('<div') || value.includes('<span'));
+                };
+
+                const leftValue = formatValue(diff.leftValue);
+                const rightValue = formatValue(diff.rightValue);
+                const leftHasHTML = hasHTMLMarkers(diff.leftValue);
+                const rightHasHTML = hasHTMLMarkers(diff.rightValue);
+
                 return (
-                  <DifferenceItem key={index}>
-                    <DifferencePath>{diff.path}</DifferencePath>
+                  <DifferenceItem key={index} $diffType={diff.type}>
+                    <DifferencePath>
+                      <span>{diff.path}</span>
+                      <DifferenceTypeBadge $type={diff.type}>{diff.type}</DifferenceTypeBadge>
+                    </DifferencePath>
                     <DifferenceValues>
                       <DifferenceValue $type="left">
                         <ValueLabel>Left</ValueLabel>
-                        <ValueContent>{formatValue(diff.leftValue)}</ValueContent>
+                        {leftHasHTML ? (
+                          <ValueContent dangerouslySetInnerHTML={{ __html: leftValue }} />
+                        ) : (
+                          <ValueContent>{leftValue}</ValueContent>
+                        )}
                       </DifferenceValue>
                       <DifferenceValue $type="right">
                         <ValueLabel>Right</ValueLabel>
-                        <ValueContent>{formatValue(diff.rightValue)}</ValueContent>
+                        {rightHasHTML ? (
+                          <ValueContent dangerouslySetInnerHTML={{ __html: rightValue }} />
+                        ) : (
+                          <ValueContent>{rightValue}</ValueContent>
+                        )}
                       </DifferenceValue>
                     </DifferenceValues>
                   </DifferenceItem>

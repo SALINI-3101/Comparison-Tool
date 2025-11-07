@@ -19,12 +19,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
   const [isDragging, setIsDragging] = useState(false);
   const [fileMetadata, setFileMetadata] = useState<FileMetadata | null>(null);
 
-  // Clear file metadata when external value is cleared
+  // Check if value is empty - if so, don't show file metadata
+  const isEmpty = value === '' || value === null || value === undefined;
+  const shouldShowMetadata = !isEmpty && fileMetadata !== null;
+
+  // Clear fileMetadata when value becomes empty (e.g., after Reset button)
   useEffect(() => {
-    if (value === '' && fileMetadata !== null) {
+    if (isEmpty && fileMetadata !== null) {
       setFileMetadata(null);
     }
-  }, [value, fileMetadata]);
+  }, [isEmpty, fileMetadata]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -51,7 +55,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
     return acceptedTypes.some(type => fileName.endsWith(type.replace('.', '')));
   }, [acceptedTypes]);
 
-  const handleFile = useCallback((file: File) => {
+  const handleFile = useCallback(async (file: File) => {
     // Check file size limit (2MB = 2 * 1024 * 1024 bytes)
     const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
     if (file.size > MAX_FILE_SIZE) {
@@ -74,19 +78,37 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-
-      const metadata: FileMetadata = {
-        name: file.name,
-        size: file.size,
-        type: getFileType(file.name),
-      };
-      setFileMetadata(metadata);
-      onFileLoad(content, file.name, file.size, metadata.type);
+    // Use async file reading with Promise wrapper
+    const readFileAsync = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(file);
+      });
     };
-    reader.readAsText(file);
+
+    try {
+      const content = await readFileAsync(file);
+
+      // Use setTimeout to defer the state update and callback
+      setTimeout(() => {
+        const metadata: FileMetadata = {
+          name: file.name,
+          size: file.size,
+          type: getFileType(file.name),
+        };
+        setFileMetadata(metadata);
+        onFileLoad(content, file.name, file.size, metadata.type);
+      }, 0);
+    } catch {
+      const errorMessage = 'Failed to read file. Please try again.';
+      if (onError) {
+        onError(errorMessage);
+      } else {
+        alert(errorMessage);
+      }
+    }
   }, [acceptedTypes, onFileLoad, onError, validateFile]);
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -122,6 +144,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
     if (files && files.length > 0) {
       handleFile(files[0]);
     }
+    // Reset the input value to allow uploading the same file again
+    e.target.value = '';
   };
 
   const handleRemove = () => {
@@ -131,7 +155,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
 
   return (
     <UploadContainer>
-      {!fileMetadata ? (
+      {!shouldShowMetadata ? (
         <DropZone
           $isDragging={isDragging}
           onDragEnter={handleDragEnter}

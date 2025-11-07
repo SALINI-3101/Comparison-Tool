@@ -10,6 +10,7 @@ type WebpackRule = {
 };
 
 const nextConfig: NextConfig = {
+  reactStrictMode: false,
   compiler: {
     styledComponents: true,
   },

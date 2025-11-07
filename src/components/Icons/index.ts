@@ -1,1 +1,1 @@
-export { ShieldIcon, RefreshIcon, PlayIcon, CompareIcon, SunIcon, MoonIcon } from './Icons';
+export { ShieldIcon, RefreshIcon, PlayIcon, CompareIcon, SunIcon, MoonIcon, DownloadIcon } from './Icons';

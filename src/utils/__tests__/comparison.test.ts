@@ -11,7 +11,7 @@ describe('validateJSON', () => {
     const result = validateJSON('{"name": "test"}');
     expect(result.isValid).toBe(true);
     expect(result.errors).toHaveLength(0);
-    expect(result.message).toBe('Valid JSON');
+    expect(result.message).toContain('Valid JSON');
   });
 
   it('should reject empty content', () => {
@@ -32,7 +32,7 @@ describe('validateXML', () => {
     const result = validateXML('<root><item>test</item></root>');
     expect(result.isValid).toBe(true);
     expect(result.errors).toHaveLength(0);
-    expect(result.message).toBe('Valid XML');
+    expect(result.message).toContain('Valid XML');
   });
 
   it('should reject empty content', () => {

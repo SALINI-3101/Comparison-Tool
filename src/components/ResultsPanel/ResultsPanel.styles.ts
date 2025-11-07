@@ -40,10 +40,14 @@ export const ResultsBody = styled.div`
   }
 `;
 
-export const DifferenceItem = styled.div`
+export const DifferenceItem = styled.div<{ $diffType?: 'added' | 'removed' | 'modified' }>`
   padding: 12px;
   margin-bottom: 12px;
-  border-left: 3px solid ${({ theme }) => theme.colors.purple};
+  border-left: 3px solid ${({ $diffType, theme }) => {
+    if ($diffType === 'added') return theme.colors.green || '#10b981';
+    if ($diffType === 'removed') return theme.colors.error || '#ef4444';
+    return theme.colors.purple || '#a855f7';
+  }};
   background: ${({ theme }) => theme.colors.gray[50]};
   border-radius: 4px;
   transition: background 0.3s ease;
@@ -60,6 +64,26 @@ export const DifferencePath = styled.div`
   margin-bottom: 8px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   transition: color 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+
+export const DifferenceTypeBadge = styled.span<{ $type: 'added' | 'removed' | 'modified' }>`
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: ${({ $type, theme }) => {
+    if ($type === 'added') return theme.colors.green || '#10b981';
+    if ($type === 'removed') return theme.colors.error || '#ef4444';
+    return theme.colors.purple || '#a855f7';
+  }};
+  color: white;
 `;
 
 export const DifferenceValues = styled.div`
@@ -73,9 +97,9 @@ export const DifferenceValues = styled.div`
 `;
 
 export const DifferenceValue = styled.div<{ $type: 'left' | 'right' }>`
-  padding: 8px 12px;
-  background: ${({ $type, theme }) => ($type === 'left' ? theme.colors.gray[100] : theme.colors.gray[100])};
-  border-radius: 4px;
+  padding: 4px;
+  background: ${({ $type }) => ($type === 'left' ? '#faf5ff' : '#eff6ff')};
+  border-radius: 6px;
   border: 2px solid ${({ $type, theme }) => ($type === 'left' ? theme.colors.purple : theme.colors.blue)};
   transition: all 0.3s ease;
 `;
@@ -92,12 +116,54 @@ export const ValueLabel = styled.div`
 
 export const ValueContent = styled.pre`
   margin: 0;
+  padding: 0;
   font-size: 13px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   color: ${({ theme }) => theme.colors.text};
   white-space: pre-wrap;
   word-break: break-word;
-  transition: color 0.3s ease;
+  transition: all 0.3s ease;
+  background-color: transparent;
+  border-radius: 4px;
+  overflow-x: auto;
+
+  .line-diff,
+  .line-same {
+    display: flex;
+    align-items: flex-start;
+    padding: 4px 8px;
+    margin: 0;
+    min-height: 24px;
+  }
+
+  .line-diff {
+    background-color: #fef3c7;
+  }
+
+  .line-same {
+    background-color: transparent;
+  }
+
+  .line-number {
+    display: inline-block;
+    min-width: 40px;
+    padding-right: 12px;
+    margin-right: 12px;
+    color: ${({ theme }) => theme.colors.subtleText};
+    text-align: right;
+    user-select: none;
+    flex-shrink: 0;
+    border-right: 1px solid ${({ theme }) => theme.colors.border};
+    font-weight: 600;
+  }
+
+  mark {
+    background-color: #fbbf24;
+    color: #000000;
+    padding: 2px 4px;
+    border-radius: 2px;
+    font-weight: 700;
+  }
 `;
 
 export const ErrorMessage = styled.div`

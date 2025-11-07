@@ -21,6 +21,8 @@ export interface ComparisonOptions {
   ignoreWhitespace?: boolean;
   caseSensitive?: boolean;
   ignoreKeyOrder?: boolean;
+  ignoreArrayOrder?: boolean;
+  ignoreAttributeOrder?: boolean;
 }
 
 /**
@@ -36,11 +38,15 @@ export function validateJSON(content: string): ValidationResult {
   }
 
   try {
-    JSON.parse(content);
+    const parsed = JSON.parse(content);
+    const lines = content.split('\n').length;
+    const sizeInKB = (new Blob([content]).size / 1024).toFixed(2);
+    const type = Array.isArray(parsed) ? 'Array' : typeof parsed === 'object' ? 'Object' : typeof parsed;
+
     return {
       isValid: true,
       errors: [],
-      message: 'Valid JSON',
+      message: `Valid JSON (${type} with ${lines} lines, ${sizeInKB} KB)`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -77,10 +83,15 @@ export function validateXML(content: string): ValidationResult {
       };
     }
 
+    const lines = content.split('\n').length;
+    const sizeInKB = (new Blob([content]).size / 1024).toFixed(2);
+    const rootElement = xmlDoc.documentElement.nodeName;
+    const elementCount = xmlDoc.getElementsByTagName('*').length;
+
     return {
       isValid: true,
       errors: [],
-      message: 'Valid XML',
+      message: `Valid XML (${rootElement} with ${elementCount} elements, ${lines} lines, ${sizeInKB} KB)`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -109,18 +120,12 @@ export function compareJSON(
   }
 
   try {
+    // Parse to validate JSON
     let leftObj = JSON.parse(leftContent);
     let rightObj = JSON.parse(rightContent);
 
-    // Store original objects for key order comparison
-    const leftOriginal = leftObj;
-    const rightOriginal = rightObj;
-
-    // Apply case sensitivity option
-    if (!options.caseSensitive) {
-      leftObj = normalizeCase(leftObj);
-      rightObj = normalizeCase(rightObj);
-    }
+    let leftFormatted: string;
+    let rightFormatted: string;
 
     // Apply ignore key order option (sort object keys)
     if (options.ignoreKeyOrder) {
@@ -128,45 +133,35 @@ export function compareJSON(
       rightObj = sortObjectKeys(rightObj);
     }
 
-    // When ignoreKeyOrder is OFF, check for key order differences
-    if (options.ignoreKeyOrder === false) {
-      // Create sorted versions to check if only key order differs
-      let leftSorted = sortObjectKeys(leftOriginal);
-      let rightSorted = sortObjectKeys(rightOriginal);
-
-      // Apply case sensitivity to sorted versions for fair comparison
-      if (!options.caseSensitive) {
-        leftSorted = normalizeCase(leftSorted);
-        rightSorted = normalizeCase(rightSorted);
-      }
-
-      // Stringify to compare
-      const leftSortedStr = JSON.stringify(leftSorted);
-      const rightSortedStr = JSON.stringify(rightSorted);
-      const leftStr = JSON.stringify(leftObj);
-      const rightStr = JSON.stringify(rightObj);
-
-      // If sorted versions are equal but original order versions are not, it's a key order difference
-      if (leftSortedStr === rightSortedStr && leftStr !== rightStr) {
-        return {
-          areEqual: false,
-          differences: [{
-            path: 'root',
-            leftValue: 'Keys in original order',
-            rightValue: 'Keys in different order',
-            type: 'modified'
-          }],
-          message: 'Content differs in key order',
-        };
-      }
+    // Apply ignore array order option (sort arrays)
+    if (options.ignoreArrayOrder) {
+      leftObj = sortArrays(leftObj);
+      rightObj = sortArrays(rightObj);
     }
 
-    const differences = findDifferences(leftObj, rightObj, '', options);
+    // When Ignore Whitespace is OFF, preserve original formatting
+    // to detect whitespace differences
+    if (options.ignoreWhitespace === false) {
+      // Use original content to preserve whitespace, but apply transformations first
+      leftFormatted = JSON.stringify(leftObj, null, 2);
+      rightFormatted = JSON.stringify(rightObj, null, 2);
+    } else {
+      // Format JSON with proper indentation for normalized comparison
+      leftFormatted = JSON.stringify(leftObj, null, 2);
+      rightFormatted = JSON.stringify(rightObj, null, 2);
+    }
+
+    // Split into lines for line-by-line comparison
+    const leftLines = leftFormatted.split('\n');
+    const rightLines = rightFormatted.split('\n');
+
+    // Perform line-by-line comparison similar to XML
+    const { differences, diffCount } = compareJSONLines(leftLines, rightLines, options);
 
     return {
-      areEqual: differences.length === 0,
+      areEqual: diffCount === 0,
       differences,
-      message: differences.length === 0 ? 'Content is identical' : `Found ${differences.length} difference(s)`,
+      message: diffCount === 0 ? 'Content is identical' : `Found ${diffCount} line(s) with differences`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -175,6 +170,246 @@ export function compareJSON(
       differences: [],
       message: `Error comparing JSON: ${errorMessage}`,
     };
+  }
+}
+
+/**
+ * Helper function to compare JSON line by line with highlighting
+ * Similar to compareXMLLines but for JSON
+ */
+function compareJSONLines(
+  leftLines: string[],
+  rightLines: string[],
+  options: ComparisonOptions
+): { differences: Difference[]; diffCount: number } {
+  const maxLines = Math.max(leftLines.length, rightLines.length);
+
+  // Adjust context based on file size
+  const LARGE_FILE_THRESHOLD = 1000;
+  const isLargeFile = maxLines > LARGE_FILE_THRESHOLD;
+  const CONTEXT_LINES = isLargeFile ? 2 : 3;
+
+  // First pass: identify which lines are different
+  const diffLineNumbers: number[] = [];
+
+  for (let i = 0; i < maxLines; i++) {
+    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
+    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
+
+    // Apply options for comparison
+    let leftCompare = leftLine;
+    let rightCompare = rightLine;
+
+    if (options.ignoreWhitespace) {
+      // Remove ALL whitespace characters for comparison
+      leftCompare = leftCompare.replace(/\s/g, '');
+      rightCompare = rightCompare.replace(/\s/g, '');
+    }
+
+    if (!options.caseSensitive) {
+      leftCompare = leftCompare.toLowerCase();
+      rightCompare = rightCompare.toLowerCase();
+    }
+
+    if (leftCompare !== rightCompare) {
+      diffLineNumbers.push(i);
+    }
+  }
+
+  const diffCount = diffLineNumbers.length;
+
+  if (diffCount === 0) {
+    return { differences: [], diffCount: 0 };
+  }
+
+  // Build set of line numbers to display (differences + context)
+  const linesToDisplay = new Set<number>();
+
+  // For very large diff counts, limit the display
+  const MAX_DIFFS_TO_DISPLAY = 1000;
+  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
+    ? diffLineNumbers.slice(0, MAX_DIFFS_TO_DISPLAY)
+    : diffLineNumbers;
+
+  diffsToProcess.forEach(lineNum => {
+    for (let j = Math.max(0, lineNum - CONTEXT_LINES); j <= Math.min(maxLines - 1, lineNum + CONTEXT_LINES); j++) {
+      linesToDisplay.add(j);
+    }
+  });
+
+  const finalLinesToDisplay = Array.from(linesToDisplay).sort((a, b) => a - b);
+
+  // Build content with only selected lines
+  let leftFullContent = '';
+  let rightFullContent = '';
+  let lastDisplayedLine = -1;
+
+  // Add warning message if showing limited results
+  if (diffCount > MAX_DIFFS_TO_DISPLAY) {
+    const infoMsg = `<div class="line-same" style="text-align: center; padding: 16px; background: #fee2e2; color: #991b1b; font-weight: 600; border-radius: 6px; margin-bottom: 12px; border: 2px solid #f87171;">⚠️ Large number of differences detected (${diffCount} lines). Showing first ${MAX_DIFFS_TO_DISPLAY} differences to prevent browser freeze. Consider using "Ignore Whitespace" toggle or comparing smaller sections.</div>\n`;
+    leftFullContent += infoMsg;
+    rightFullContent += infoMsg;
+  }
+
+  finalLinesToDisplay.forEach((i) => {
+    // Add ellipsis if there's a gap
+    if (lastDisplayedLine >= 0 && i > lastDisplayedLine + 1) {
+      leftFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
+      rightFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
+    }
+
+    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
+    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
+    const leftOriginal = leftLine;
+    const rightOriginal = rightLine;
+
+    // Apply options for comparison
+    let leftCompare = leftLine;
+    let rightCompare = rightLine;
+
+    if (options.ignoreWhitespace) {
+      // Remove ALL whitespace characters for comparison
+      leftCompare = leftCompare.replace(/\s/g, '');
+      rightCompare = rightCompare.replace(/\s/g, '');
+    }
+
+    if (!options.caseSensitive) {
+      leftCompare = leftCompare.toLowerCase();
+      rightCompare = rightCompare.toLowerCase();
+    }
+
+    const lineNum = i + 1;
+
+    // Check if lines are different
+    if (leftCompare !== rightCompare) {
+      // Highlight the differences within the line
+      const highlightedLeft = highlightJSONDifference(leftOriginal, rightOriginal);
+      const highlightedRight = highlightJSONDifference(rightOriginal, leftOriginal);
+
+      leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
+      rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
+    } else {
+      // Show unchanged lines with HTML-escaped content
+      const escapedLeft = escapeHtml(leftOriginal);
+      const escapedRight = escapeHtml(rightOriginal);
+      leftFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
+    }
+
+    lastDisplayedLine = i;
+  });
+
+  // Return a single difference containing the content
+  return {
+    differences: [{
+      path: 'Full Document',
+      leftValue: leftFullContent,
+      rightValue: rightFullContent,
+      type: 'modified',
+    }],
+    diffCount,
+  };
+}
+
+/**
+ * Helper function to highlight differences within JSON lines
+ */
+function highlightJSONDifference(line: string, compareLine: string): string {
+  if (!line && !compareLine) return '';
+  if (!line) return escapeHtml('(empty line)');
+  if (!compareLine) return escapeHtml(line);
+
+  // For very long lines, skip detailed highlighting
+  if (line.length > 500) {
+    return escapeHtml(line);
+  }
+
+  // Find differences character by character for JSON
+  let result = '';
+  let inDiff = false;
+  let diffStart = -1;
+
+  for (let i = 0; i < line.length; i++) {
+    if (i < compareLine.length && line[i] === compareLine[i]) {
+      // Characters match
+      if (inDiff) {
+        // End of difference region
+        result += '<mark>' + escapeHtml(line.substring(diffStart, i)) + '</mark>';
+        inDiff = false;
+      }
+      result += escapeHtml(line[i]);
+    } else {
+      // Characters differ
+      if (!inDiff) {
+        diffStart = i;
+        inDiff = true;
+      }
+    }
+  }
+
+  // Close any remaining diff region
+  if (inDiff) {
+    result += '<mark>' + escapeHtml(line.substring(diffStart)) + '</mark>';
+  }
+
+  return result;
+}
+
+/**
+ * Helper function to recursively sort attributes in all elements
+ */
+function sortXMLAttributes(element: Element): void {
+  if (element.attributes.length > 0) {
+    // Get all attributes
+    const attrs: Array<{ name: string; value: string }> = [];
+    for (let i = 0; i < element.attributes.length; i++) {
+      const attr = element.attributes[i];
+      attrs.push({ name: attr.name, value: attr.value });
+    }
+
+    // Sort attributes by name
+    attrs.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Remove all attributes
+    while (element.attributes.length > 0) {
+      element.removeAttribute(element.attributes[0].name);
+    }
+
+    // Add attributes back in sorted order
+    attrs.forEach(attr => {
+      element.setAttribute(attr.name, attr.value);
+    });
+  }
+
+  // Recursively process child elements
+  for (let i = 0; i < element.children.length; i++) {
+    sortXMLAttributes(element.children[i]);
+  }
+}
+
+/**
+ * Helper function to normalize XML by sorting attributes
+ */
+function normalizeXMLAttributes(xmlString: string): string {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlString, 'text/xml');
+
+    // Check for parsing errors
+    const error = doc.querySelector('parsererror');
+    if (error) {
+      return xmlString; // Return original if parsing fails
+    }
+
+    if (doc.documentElement) {
+      sortXMLAttributes(doc.documentElement);
+    }
+
+    // Serialize back to string
+    const serializer = new XMLSerializer();
+    return serializer.serializeToString(doc);
+  } catch {
+    return xmlString; // Return original if any error occurs
   }
 }
 
@@ -195,26 +430,52 @@ export function compareXML(
   }
 
   try {
-    let left = leftContent;
-    let right = rightContent;
+    // Validate XML syntax first
+    const parser = new DOMParser();
+    const leftDoc = parser.parseFromString(leftContent, 'text/xml');
+    const rightDoc = parser.parseFromString(rightContent, 'text/xml');
 
-    if (options.ignoreWhitespace) {
-      // Remove all whitespace between tags and normalize internal whitespace
-      left = left.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
-      right = right.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
+    // Check for parsing errors
+    const leftError = leftDoc.querySelector('parsererror');
+    const rightError = rightDoc.querySelector('parsererror');
+
+    if (leftError || rightError) {
+      return {
+        areEqual: false,
+        differences: [],
+        message: 'One or both XML documents contain parsing errors',
+      };
     }
 
-    if (!options.caseSensitive) {
-      left = left.toLowerCase();
-      right = right.toLowerCase();
+    // When ignoreAttributeOrder is ON, normalize (sort) attributes
+    // When OFF, use original content for true attribute order comparison
+    let leftProcessed = leftContent;
+    let rightProcessed = rightContent;
+
+    if (options.ignoreAttributeOrder) {
+      leftProcessed = normalizeXMLAttributes(leftContent);
+      rightProcessed = normalizeXMLAttributes(rightContent);
     }
 
-    const areEqual = left === right;
+    // Split into lines for line-by-line comparison with context
+    const leftLines = leftProcessed.split('\n');
+    const rightLines = rightProcessed.split('\n');
+
+    // Do line-by-line comparison
+    const { differences, diffCount } = compareXMLLines(leftLines, rightLines, options);
+
+    if (diffCount > 0) {
+      return {
+        areEqual: false,
+        differences,
+        message: `Found ${diffCount} line(s) with differences`,
+      };
+    }
 
     return {
-      areEqual,
-      differences: areEqual ? [] : [{ path: 'root', leftValue: left, rightValue: right, type: 'modified' }],
-      message: areEqual ? 'Content is identical' : 'Content differs',
+      areEqual: true,
+      differences: [],
+      message: 'Content is identical',
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -224,6 +485,419 @@ export function compareXML(
       message: `Error comparing XML: ${errorMessage}`,
     };
   }
+}
+
+/**
+ * Helper function to escape HTML special characters
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Helper function to compare XML line by line with highlighting
+ * Returns all lines with differences highlighted
+ * Optimized for large files by showing only context around differences
+ */
+function compareXMLLines(
+  leftLines: string[],
+  rightLines: string[],
+  options: ComparisonOptions
+): { differences: Difference[]; diffCount: number } {
+  const maxLines = Math.max(leftLines.length, rightLines.length);
+
+  // Adjust context based on file size
+  const LARGE_FILE_THRESHOLD = 1000; // Consider files with >1000 lines as large
+  const isLargeFile = maxLines > LARGE_FILE_THRESHOLD;
+
+  const CONTEXT_LINES = isLargeFile ? 2 : 3; // Show 2 lines for large files, 3 for small
+
+  // First pass: identify which lines are different
+  const diffLineNumbers: number[] = [];
+
+  for (let i = 0; i < maxLines; i++) {
+    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
+    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
+
+    // Apply options for comparison
+    let leftCompare = leftLine;
+    let rightCompare = rightLine;
+
+    if (options.ignoreWhitespace) {
+      // Remove ALL whitespace characters for comparison
+      leftCompare = leftCompare.replace(/\s/g, '');
+      rightCompare = rightCompare.replace(/\s/g, '');
+    }
+
+    if (!options.caseSensitive) {
+      leftCompare = leftCompare.toLowerCase();
+      rightCompare = rightCompare.toLowerCase();
+    }
+
+    if (leftCompare !== rightCompare) {
+      diffLineNumbers.push(i);
+    }
+  }
+
+  const diffCount = diffLineNumbers.length;
+
+  if (diffCount === 0) {
+    return { differences: [], diffCount: 0 };
+  }
+
+  // Build set of line numbers to display (differences + context)
+  const linesToDisplay = new Set<number>();
+
+  // For very large diff counts, limit the display to prevent browser freeze
+  const MAX_DIFFS_TO_DISPLAY = 1000;
+  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
+    ? diffLineNumbers.slice(0, MAX_DIFFS_TO_DISPLAY)
+    : diffLineNumbers;
+
+  diffsToProcess.forEach(lineNum => {
+    for (let j = Math.max(0, lineNum - CONTEXT_LINES); j <= Math.min(maxLines - 1, lineNum + CONTEXT_LINES); j++) {
+      linesToDisplay.add(j);
+    }
+  });
+
+  const finalLinesToDisplay = Array.from(linesToDisplay).sort((a, b) => a - b);
+
+  // Build content with only selected lines
+  let leftFullContent = '';
+  let rightFullContent = '';
+  let lastDisplayedLine = -1;
+
+  // Add warning message if showing limited results
+  if (diffCount > MAX_DIFFS_TO_DISPLAY) {
+    const infoMsg = `<div class="line-same" style="text-align: center; padding: 16px; background: #fee2e2; color: #991b1b; font-weight: 600; border-radius: 6px; margin-bottom: 12px; border: 2px solid #f87171;">⚠️ Large number of differences detected (${diffCount} lines). Showing first ${MAX_DIFFS_TO_DISPLAY} differences to prevent browser freeze. Consider using "Ignore Whitespace" toggle or comparing smaller sections.</div>\n`;
+    leftFullContent += infoMsg;
+    rightFullContent += infoMsg;
+  }
+
+  finalLinesToDisplay.forEach((i) => {
+    // Add ellipsis if there's a gap
+    if (lastDisplayedLine >= 0 && i > lastDisplayedLine + 1) {
+      leftFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
+      rightFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
+    }
+
+    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
+    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
+    const leftOriginal = leftLine;
+    const rightOriginal = rightLine;
+
+    // Apply options for comparison
+    let leftCompare = leftLine;
+    let rightCompare = rightLine;
+
+    if (options.ignoreWhitespace) {
+      // Remove ALL whitespace characters for comparison
+      leftCompare = leftCompare.replace(/\s/g, '');
+      rightCompare = rightCompare.replace(/\s/g, '');
+    }
+
+    if (!options.caseSensitive) {
+      leftCompare = leftCompare.toLowerCase();
+      rightCompare = rightCompare.toLowerCase();
+    }
+
+    const lineNum = i + 1;
+
+    // Check if lines are different
+    if (leftCompare !== rightCompare) {
+      // Highlight the differences within the line
+      const highlightedLeft = highlightXMLDifference(leftOriginal, rightOriginal);
+      const highlightedRight = highlightXMLDifference(rightOriginal, leftOriginal);
+
+      leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
+      rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
+    } else {
+      // Show unchanged lines with HTML-escaped content
+      const escapedLeft = escapeHtml(leftOriginal);
+      const escapedRight = escapeHtml(rightOriginal);
+      leftFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
+    }
+
+    lastDisplayedLine = i;
+  });
+
+  // Return a single difference containing the content
+  return {
+    differences: [{
+      path: 'Full Document',
+      leftValue: leftFullContent,
+      rightValue: rightFullContent,
+      type: 'modified',
+    }],
+    diffCount,
+  };
+}
+
+/**
+ * Helper function to highlight differences within XML lines
+ * Optimized for performance with large lines
+ */
+function highlightXMLDifference(line: string, compareLine: string): string {
+  if (!line && !compareLine) return '';
+  if (!line) return escapeHtml('(empty line)');
+  if (!compareLine) return escapeHtml(line);
+
+  // For very long lines (>500 chars), skip detailed highlighting to prevent freezing
+  if (line.length > 500) {
+    return escapeHtml(line);
+  }
+
+  // For XML, we want to show the full line with the changed part highlighted
+  // Extract the content between tags
+  const tagContentRegex = />([^<]+)</g;
+  const attrRegex = /(\w+)=["']([^"']+)["']/g;
+
+  // First, find all differences and their positions
+  const differences: { start: number; end: number; replacement: string }[] = [];
+
+  try {
+    // Find text content differences
+    const lineMatches = Array.from(line.matchAll(tagContentRegex));
+    const compareMatches = Array.from(compareLine.matchAll(tagContentRegex));
+
+    lineMatches.forEach((match, idx) => {
+      if (compareMatches[idx] && match[1] !== compareMatches[idx][1]) {
+        // Mark this content as different
+        const contentStart = match.index! + 1; // After the '>'
+        const contentEnd = contentStart + match[1].length;
+        differences.push({
+          start: contentStart,
+          end: contentEnd,
+          replacement: `__MARK_START__${match[1]}__MARK_END__`,
+        });
+      }
+    });
+
+    // Find attribute differences
+    const lineAttrs = Array.from(line.matchAll(attrRegex));
+    const compareAttrs = Array.from(compareLine.matchAll(attrRegex));
+
+    lineAttrs.forEach((match) => {
+      const attrName = match[1];
+      const attrValue = match[2];
+      const compareAttr = compareAttrs.find(m => m[1] === attrName);
+
+      if (!compareAttr || compareAttr[2] !== attrValue) {
+        // Mark this attribute value as different
+        const valueStart = match.index! + match[0].indexOf(attrValue);
+        const valueEnd = valueStart + attrValue.length;
+        differences.push({
+          start: valueStart,
+          end: valueEnd,
+          replacement: `__MARK_START__${attrValue}__MARK_END__`,
+        });
+      }
+    });
+
+    // Sort differences by position (reverse order to apply from end to start)
+    differences.sort((a, b) => b.start - a.start);
+
+    // Apply differences
+    let result = line;
+    differences.forEach(diff => {
+      result = result.substring(0, diff.start) + diff.replacement + result.substring(diff.end);
+    });
+
+    // Now escape HTML
+    result = escapeHtml(result);
+
+    // Replace markers with actual <mark> tags (after escaping)
+    result = result.replace(/__MARK_START__/g, '<mark>').replace(/__MARK_END__/g, '</mark>');
+
+    return result;
+  } catch {
+    // If highlighting fails, just return the escaped line
+    return escapeHtml(line);
+  }
+}
+
+/**
+ * Helper function to compare XML nodes recursively (unused - kept for potential future use)
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function compareXMLNodes(
+  leftNode: Element | null,
+  rightNode: Element | null,
+  path: string,
+  options: ComparisonOptions
+): Difference[] {
+  const differences: Difference[] = [];
+
+  if (!leftNode && !rightNode) {
+    return differences;
+  }
+
+  if (!leftNode) {
+    differences.push({
+      path: path || 'root',
+      leftValue: undefined,
+      rightValue: `<${rightNode!.nodeName}>`,
+      type: 'added',
+    });
+    return differences;
+  }
+
+  if (!rightNode) {
+    differences.push({
+      path: path || 'root',
+      leftValue: `<${leftNode.nodeName}>`,
+      rightValue: undefined,
+      type: 'removed',
+    });
+    return differences;
+  }
+
+  const currentPath = path ? `${path}/${leftNode.nodeName}` : leftNode.nodeName;
+
+  // Compare node names
+  let leftName = leftNode.nodeName;
+  let rightName = rightNode.nodeName;
+
+  if (!options.caseSensitive) {
+    leftName = leftName.toLowerCase();
+    rightName = rightName.toLowerCase();
+  }
+
+  if (leftName !== rightName) {
+    differences.push({
+      path: currentPath,
+      leftValue: `<${leftNode.nodeName}>`,
+      rightValue: `<${rightNode.nodeName}>`,
+      type: 'modified',
+    });
+    return differences;
+  }
+
+  // Compare attributes
+  const leftAttrs = leftNode.attributes;
+  const rightAttrs = rightNode.attributes;
+  const attrNames = new Set<string>();
+
+  for (let i = 0; i < leftAttrs.length; i++) {
+    attrNames.add(leftAttrs[i].name);
+  }
+  for (let i = 0; i < rightAttrs.length; i++) {
+    attrNames.add(rightAttrs[i].name);
+  }
+
+  for (const attrName of attrNames) {
+    let leftValue = leftNode.getAttribute(attrName);
+    let rightValue = rightNode.getAttribute(attrName);
+
+    // Apply options
+    if (options.ignoreWhitespace) {
+      leftValue = leftValue?.trim() || null;
+      rightValue = rightValue?.trim() || null;
+    }
+
+    if (!options.caseSensitive) {
+      leftValue = leftValue?.toLowerCase() || null;
+      rightValue = rightValue?.toLowerCase() || null;
+    }
+
+    if (leftValue !== rightValue) {
+      differences.push({
+        path: `${currentPath}/@${attrName}`,
+        leftValue: leftValue || '(not set)',
+        rightValue: rightValue || '(not set)',
+        type: leftValue === null ? 'added' : rightValue === null ? 'removed' : 'modified',
+      });
+    }
+  }
+
+  // Compare text content (only direct text nodes, not nested)
+  let leftText = '';
+  let rightText = '';
+
+  for (let i = 0; i < leftNode.childNodes.length; i++) {
+    const child = leftNode.childNodes[i];
+    if (child.nodeType === Node.TEXT_NODE) {
+      leftText += child.textContent || '';
+    }
+  }
+
+  for (let i = 0; i < rightNode.childNodes.length; i++) {
+    const child = rightNode.childNodes[i];
+    if (child.nodeType === Node.TEXT_NODE) {
+      rightText += child.textContent || '';
+    }
+  }
+
+  if (options.ignoreWhitespace) {
+    leftText = leftText.replace(/\s+/g, ' ').trim();
+    rightText = rightText.replace(/\s+/g, ' ').trim();
+  }
+
+  if (!options.caseSensitive) {
+    leftText = leftText.toLowerCase();
+    rightText = rightText.toLowerCase();
+  }
+
+  if (leftText !== rightText && (leftText || rightText)) {
+    differences.push({
+      path: `${currentPath}/text()`,
+      leftValue: leftText || '(empty)',
+      rightValue: rightText || '(empty)',
+      type: 'modified',
+    });
+  }
+
+  // Compare child elements
+  const leftChildren = Array.from(leftNode.children);
+  const rightChildren = Array.from(rightNode.children);
+
+  // Create a map of children by tag name for better comparison
+  const leftChildMap = new Map<string, Element[]>();
+  const rightChildMap = new Map<string, Element[]>();
+
+  leftChildren.forEach((child) => {
+    const name = options.caseSensitive ? child.nodeName : child.nodeName.toLowerCase();
+    if (!leftChildMap.has(name)) {
+      leftChildMap.set(name, []);
+    }
+    leftChildMap.get(name)!.push(child);
+  });
+
+  rightChildren.forEach((child) => {
+    const name = options.caseSensitive ? child.nodeName : child.nodeName.toLowerCase();
+    if (!rightChildMap.has(name)) {
+      rightChildMap.set(name, []);
+    }
+    rightChildMap.get(name)!.push(child);
+  });
+
+  const allChildNames = new Set([...leftChildMap.keys(), ...rightChildMap.keys()]);
+
+  for (const childName of allChildNames) {
+    const leftChildrenOfType = leftChildMap.get(childName) || [];
+    const rightChildrenOfType = rightChildMap.get(childName) || [];
+    const maxLength = Math.max(leftChildrenOfType.length, rightChildrenOfType.length);
+
+    for (let i = 0; i < maxLength; i++) {
+      const indexPath = maxLength > 1 ? `${currentPath}/${childName}[${i + 1}]` : currentPath;
+      differences.push(
+        ...compareXMLNodes(
+          leftChildrenOfType[i] || null,
+          rightChildrenOfType[i] || null,
+          indexPath,
+          options
+        )
+      );
+    }
+  }
+
+  return differences;
 }
 
 /**
@@ -242,69 +916,206 @@ export function compareText(
     };
   }
 
-  // Split into lines first
+  // Split into lines for line-by-line comparison
   const leftLines = leftContent.split('\n');
   const rightLines = rightContent.split('\n');
+
+  // Perform line-by-line comparison similar to JSON/XML
+  const { differences, diffCount } = compareTextLines(leftLines, rightLines, options);
+
+  return {
+    areEqual: diffCount === 0,
+    differences,
+    message: diffCount === 0 ? 'Content is identical' : `Found ${diffCount} line(s) with differences`,
+  };
+}
+
+/**
+ * Helper function to compare text line by line with highlighting
+ * Similar to compareJSONLines and compareXMLLines
+ */
+function compareTextLines(
+  leftLines: string[],
+  rightLines: string[],
+  options: ComparisonOptions
+): { differences: Difference[]; diffCount: number } {
   const maxLines = Math.max(leftLines.length, rightLines.length);
 
-  const differences: Difference[] = [];
+  // Adjust context based on file size
+  const LARGE_FILE_THRESHOLD = 1000;
+  const isLargeFile = maxLines > LARGE_FILE_THRESHOLD;
+  const CONTEXT_LINES = isLargeFile ? 2 : 3;
 
-  // Compare line by line with options applied
+  // First pass: identify which lines are different
+  const diffLineNumbers: number[] = [];
+
   for (let i = 0; i < maxLines; i++) {
-    let leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    let rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
+    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
+    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
 
-    // Store original lines for display
+    // Apply options for comparison
+    let leftCompare = leftLine;
+    let rightCompare = rightLine;
+
+    if (options.ignoreWhitespace) {
+      // Remove ALL whitespace characters for comparison
+      leftCompare = leftCompare.replace(/\s/g, '');
+      rightCompare = rightCompare.replace(/\s/g, '');
+    }
+
+    if (!options.caseSensitive) {
+      leftCompare = leftCompare.toLowerCase();
+      rightCompare = rightCompare.toLowerCase();
+    }
+
+    if (leftCompare !== rightCompare) {
+      diffLineNumbers.push(i);
+    }
+  }
+
+  const diffCount = diffLineNumbers.length;
+
+  if (diffCount === 0) {
+    return { differences: [], diffCount: 0 };
+  }
+
+  // Build set of line numbers to display (differences + context)
+  const linesToDisplay = new Set<number>();
+
+  // For very large diff counts, limit the display
+  const MAX_DIFFS_TO_DISPLAY = 1000;
+  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
+    ? diffLineNumbers.slice(0, MAX_DIFFS_TO_DISPLAY)
+    : diffLineNumbers;
+
+  diffsToProcess.forEach(lineNum => {
+    for (let j = Math.max(0, lineNum - CONTEXT_LINES); j <= Math.min(maxLines - 1, lineNum + CONTEXT_LINES); j++) {
+      linesToDisplay.add(j);
+    }
+  });
+
+  const finalLinesToDisplay = Array.from(linesToDisplay).sort((a, b) => a - b);
+
+  // Build content with only selected lines
+  let leftFullContent = '';
+  let rightFullContent = '';
+  let lastDisplayedLine = -1;
+
+  // Add warning message if showing limited results
+  if (diffCount > MAX_DIFFS_TO_DISPLAY) {
+    const infoMsg = `<div class="line-same" style="text-align: center; padding: 16px; background: #fee2e2; color: #991b1b; font-weight: 600; border-radius: 6px; margin-bottom: 12px; border: 2px solid #f87171;">⚠️ Large number of differences detected (${diffCount} lines). Showing first ${MAX_DIFFS_TO_DISPLAY} differences to prevent browser freeze. Consider using "Ignore Whitespace" toggle or comparing smaller sections.</div>\n`;
+    leftFullContent += infoMsg;
+    rightFullContent += infoMsg;
+  }
+
+  finalLinesToDisplay.forEach((i) => {
+    // Add ellipsis if there's a gap
+    if (lastDisplayedLine >= 0 && i > lastDisplayedLine + 1) {
+      leftFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
+      rightFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
+    }
+
+    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
+    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
     const leftOriginal = leftLine;
     const rightOriginal = rightLine;
 
     // Apply options for comparison
+    let leftCompare = leftLine;
+    let rightCompare = rightLine;
+
     if (options.ignoreWhitespace) {
-      leftLine = leftLine.replace(/\s+/g, ' ').trim();
-      rightLine = rightLine.replace(/\s+/g, ' ').trim();
+      // Remove ALL whitespace characters for comparison
+      leftCompare = leftCompare.replace(/\s/g, '');
+      rightCompare = rightCompare.replace(/\s/g, '');
     }
 
     if (!options.caseSensitive) {
-      leftLine = leftLine.toLowerCase();
-      rightLine = rightLine.toLowerCase();
+      leftCompare = leftCompare.toLowerCase();
+      rightCompare = rightCompare.toLowerCase();
     }
 
-    // Check if lines are different after applying options
-    if (leftLine !== rightLine) {
-      // Find the specific differences for highlighting
-      const diff = findTextDifference(leftOriginal, rightOriginal, options);
+    const lineNum = i + 1;
 
-      differences.push({
-        path: `Line ${i + 1}`,
-        leftValue: diff.left,
-        rightValue: diff.right,
-        type: leftOriginal === '' ? 'added' : rightOriginal === '' ? 'removed' : 'modified',
-      });
+    // Check if lines are different
+    if (leftCompare !== rightCompare) {
+      // Highlight the differences within the line
+      const highlightedLeft = highlightTextDifference(leftOriginal, rightOriginal);
+      const highlightedRight = highlightTextDifference(rightOriginal, leftOriginal);
+
+      leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
+      rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
+    } else {
+      // Show unchanged lines with HTML-escaped content
+      const escapedLeft = escapeHtml(leftOriginal);
+      const escapedRight = escapeHtml(rightOriginal);
+      leftFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
+    }
+
+    lastDisplayedLine = i;
+  });
+
+  // Return a single difference containing the content
+  return {
+    differences: [{
+      path: 'Full Document',
+      leftValue: leftFullContent,
+      rightValue: rightFullContent,
+      type: 'modified',
+    }],
+    diffCount,
+  };
+}
+
+/**
+ * Helper function to highlight differences within text lines
+ */
+function highlightTextDifference(line: string, compareLine: string): string {
+  if (!line && !compareLine) return '';
+  if (!line) return escapeHtml('(empty line)');
+  if (!compareLine) return escapeHtml(line);
+
+  // For very long lines, skip detailed highlighting
+  if (line.length > 500) {
+    return escapeHtml(line);
+  }
+
+  // Find differences character by character
+  let result = '';
+  let inDiff = false;
+  let diffStart = -1;
+
+  for (let i = 0; i < line.length; i++) {
+    if (i < compareLine.length && line[i] === compareLine[i]) {
+      // Characters match
+      if (inDiff) {
+        // End of difference region
+        result += '<mark>' + escapeHtml(line.substring(diffStart, i)) + '</mark>';
+        inDiff = false;
+      }
+      result += escapeHtml(line[i]);
+    } else {
+      // Characters differ
+      if (!inDiff) {
+        diffStart = i;
+        inDiff = true;
+      }
     }
   }
 
-  return {
-    areEqual: differences.length === 0,
-    differences,
-    message: differences.length === 0 ? 'Content is identical' : `Found ${differences.length} line(s) with differences`,
-  };
+  // Close any remaining diff region
+  if (inDiff) {
+    result += '<mark>' + escapeHtml(line.substring(diffStart)) + '</mark>';
+  }
+
+  return result;
 }
 
 /**
- * Helper function to find and highlight differences between two text strings
+ * Helper function to normalize case for objects (unused - kept for potential future use)
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function findTextDifference(left: string, right: string, _options: ComparisonOptions): { left: string; right: string } {
-  // Return the original strings for display
-  return {
-    left: left || '(empty line)',
-    right: right || '(empty line)',
-  };
-}
-
-/**
- * Helper function to normalize case for objects
- */
 function normalizeCase(obj: unknown): unknown {
   if (typeof obj === 'string') {
     return obj.toLowerCase();
@@ -344,8 +1155,37 @@ function sortObjectKeys(obj: unknown): unknown {
 }
 
 /**
- * Helper function to find differences between two objects
+ * Helper function to normalize arrays by sorting them recursively
+ * This allows array comparison to ignore element order
  */
+function sortArrays(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    // Recursively sort nested arrays/objects first
+    const processed = obj.map(sortArrays);
+    // Sort the array by stringified representation for comparison
+    return processed.sort((a, b) => {
+      const aStr = JSON.stringify(a);
+      const bStr = JSON.stringify(b);
+      return aStr.localeCompare(bStr);
+    });
+  }
+  if (typeof obj === 'object') {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj)) {
+      sorted[key] = sortArrays((obj as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return obj;
+}
+
+/**
+ * Helper function to find differences between two objects (unused - kept for potential future use)
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function findDifferences(left: unknown, right: unknown, path: string, options: ComparisonOptions): Difference[] {
   const differences: Difference[] = [];
 
@@ -427,4 +1267,33 @@ function findDifferences(left: unknown, right: unknown, path: string, options: C
   }
 
   return differences;
+}
+
+/**
+ * Downloads content as a file
+ */
+export function downloadContent(content: string, filename: string, type: 'json' | 'xml' | 'txt'): void {
+  if (!content || content.trim() === '') {
+    return;
+  }
+
+  // Determine MIME type
+  const mimeTypes = {
+    json: 'application/json',
+    xml: 'application/xml',
+    txt: 'text/plain',
+  };
+
+  const mimeType = mimeTypes[type];
+
+  // Create blob and download
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }

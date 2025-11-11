@@ -16,16 +16,13 @@ export const ThemeContext = createContext<{
 });
 
 function App({ Component, pageProps }: AppProps) {
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    // Try to get theme from localStorage during initial render
-    if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('theme') as ThemeMode | null;
-      return savedTheme || 'light';
-    }
-    return 'light';
-  });
+  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
 
   useEffect(() => {
+    // Always set theme to light mode and clear any saved theme preference
+    setThemeMode('light');
+    localStorage.removeItem('theme');
+
     // Mark app as hydrated to prevent FOUC
     document.getElementById('__next')?.classList.add('hydrated');
 
@@ -37,7 +34,7 @@ function App({ Component, pageProps }: AppProps) {
   const toggleTheme = () => {
     const newTheme = themeMode === 'light' ? 'dark' : 'light';
     setThemeMode(newTheme);
-    localStorage.setItem('theme', newTheme);
+    // Theme preference is not saved anymore - always starts in light mode
   };
 
   const currentTheme = themeMode === 'light' ? lightTheme : darkTheme;

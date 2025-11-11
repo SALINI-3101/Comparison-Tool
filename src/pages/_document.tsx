@@ -26,8 +26,9 @@ export default function Document() {
             __html: `
               (function() {
                 try {
-                  var theme = localStorage.getItem('theme') || 'light';
-                  document.documentElement.setAttribute('data-theme', theme);
+                  // Always set to light mode and remove any saved theme
+                  localStorage.removeItem('theme');
+                  document.documentElement.setAttribute('data-theme', 'light');
                 } catch (e) {}
               })();
             `,

@@ -12,10 +12,6 @@ export default function Document() {
             __html: `
               /* Critical CSS to prevent FOUC */
               #__next {
-                opacity: 0;
-                transition: opacity 0.001s;
-              }
-              #__next.hydrated {
                 opacity: 1;
               }
             `,
@@ -24,12 +20,18 @@ export default function Document() {
         <script
           dangerouslySetInnerHTML={{
             __html: `
+              // CRITICAL: This must run synchronously BEFORE any content renders
               (function() {
+                var savedTheme = null;
                 try {
-                  // Always set to light mode and remove any saved theme
-                  localStorage.removeItem('theme');
-                  document.documentElement.setAttribute('data-theme', 'light');
+                  savedTheme = localStorage.getItem('theme');
                 } catch (e) {}
+
+                var theme = (savedTheme === 'dark' || savedTheme === 'light') ? savedTheme : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+
+                // Also set it on body immediately for faster application
+                document.documentElement.style.backgroundColor = theme === 'dark' ? '#111827' : '#f9fafb';
               })();
             `,
           }}

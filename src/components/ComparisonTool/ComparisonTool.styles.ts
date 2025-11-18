@@ -171,26 +171,28 @@ export const ThemeToggleButton = styled.button`
 `;
 
 export const ClearButton = styled.button`
-  background: ${({ theme }) => theme.colors.purple};
-  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
   color: white;
-  padding: 12px 32px;
-  border-radius: 8px;
-  font-size: 15px;
+  padding: 8px 20px;
+  border-radius: 20px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
   transition: all 0.2s ease;
-  box-shadow: ${({ theme }) => theme.shadows.sm};
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
 
   &:hover {
-    background: #7c3aed;
-    transform: translateY(-2px);
-    box-shadow: ${({ theme }) => theme.shadows.md};
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   &:active {
@@ -198,25 +200,31 @@ export const ClearButton = styled.button`
   }
 
   svg {
-    width: 18px;
-    height: 18px;
+    width: 15px;
+    height: 15px;
   }
 
-  @media (max-width: 1024px) {
-    padding: 10px 24px;
-    font-size: 14px;
-    width: 100%;
-    justify-content: center;
+  @media (max-width: 768px) {
+    padding: 6px 14px;
+    font-size: 12px;
+    gap: 5px;
+    border-radius: 16px;
+
+    svg {
+      width: 13px;
+      height: 13px;
+    }
   }
 
   @media (max-width: 480px) {
-    padding: 8px 16px;
-    font-size: 13px;
-    gap: 6px;
+    padding: 5px 10px;
+    font-size: 11px;
+    gap: 4px;
+    border-radius: 14px;
 
     svg {
-      width: 16px;
-      height: 16px;
+      width: 11px;
+      height: 11px;
     }
   }
 `;
@@ -339,10 +347,10 @@ export const DualEditorContainer = styled.div`
   }
 `;
 
-export const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
-  background: ${({ variant, theme }) =>
-    variant === 'primary' ? theme.colors.purple : theme.colors.gray[100]};
-  color: ${({ variant, theme }) => (variant === 'primary' ? 'white' : theme.colors.gray[700])};
+export const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
+  background: ${({ $variant, theme }) =>
+    $variant === 'primary' ? theme.colors.purple : theme.colors.gray[100]};
+  color: ${({ $variant, theme }) => ($variant === 'primary' ? 'white' : theme.colors.gray[700])};
   border: none;
   padding: 12px 32px;
   border-radius: 8px;
@@ -356,13 +364,18 @@ export const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' }>
   box-shadow: ${({ theme }) => theme.shadows.sm};
   white-space: nowrap;
 
-  &:hover {
+  &:hover:not(:disabled) {
     transform: translateY(-2px);
     box-shadow: ${({ theme }) => theme.shadows.md};
   }
 
-  &:active {
+  &:active:not(:disabled) {
     transform: translateY(0);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   svg {

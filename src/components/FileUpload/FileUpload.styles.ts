@@ -2,6 +2,9 @@ import styled from 'styled-components';
 
 export const UploadContainer = styled.div`
   margin-bottom: 12px;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
 `;
 
 export const DropZone = styled.div<{ $isDragging: boolean }>`
@@ -12,6 +15,10 @@ export const DropZone = styled.div<{ $isDragging: boolean }>`
   background-color: ${({ $isDragging, theme }) => ($isDragging ? theme.colors.lightPurple : theme.colors.gray[50])};
   transition: all 0.3s ease;
   cursor: pointer;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
   &:hover {
     border-color: ${({ theme }) => theme.colors.purple};
@@ -37,6 +44,7 @@ export const FileInfo = styled.div`
   font-size: 13px;
   transition: all 0.3s ease;
   flex-wrap: wrap;
+  flex: 1;
 
   @media (max-width: 768px) {
     gap: 8px;

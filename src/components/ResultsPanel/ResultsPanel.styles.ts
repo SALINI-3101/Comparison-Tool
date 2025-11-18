@@ -43,12 +43,7 @@ export const ResultsBody = styled.div`
 export const DifferenceItem = styled.div<{ $diffType?: 'added' | 'removed' | 'modified' }>`
   padding: 12px;
   margin-bottom: 12px;
-  border-left: 3px solid ${({ $diffType, theme }) => {
-    if ($diffType === 'added') return theme.colors.green || '#10b981';
-    if ($diffType === 'removed') return theme.colors.error || '#ef4444';
-    return theme.colors.purple || '#a855f7';
-  }};
-  background: ${({ theme }) => theme.colors.gray[50]};
+  background: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(255, 255, 255, 0.05)' : theme.colors.gray[50]};
   border-radius: 4px;
   transition: background 0.3s ease;
 
@@ -98,7 +93,7 @@ export const DifferenceValues = styled.div`
 
 export const DifferenceValue = styled.div<{ $type: 'left' | 'right' }>`
   padding: 4px;
-  background: ${({ $type }) => ($type === 'left' ? '#faf5ff' : '#eff6ff')};
+  background: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(255, 255, 255, 0.08)' : theme.colors.cardBackground};
   border-radius: 6px;
   border: 2px solid ${({ $type, theme }) => ($type === 'left' ? theme.colors.purple : theme.colors.blue)};
   transition: all 0.3s ease;
@@ -118,7 +113,7 @@ export const ValueContent = styled.pre`
   margin: 0;
   padding: 0;
   font-size: 13px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-family: 'Segoe UI', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Consolas', 'Monaco', 'Courier New', monospace;
   color: ${({ theme }) => theme.colors.text};
   white-space: pre-wrap;
   word-break: break-word;
@@ -130,14 +125,15 @@ export const ValueContent = styled.pre`
   .line-diff,
   .line-same {
     display: flex;
-    align-items: flex-start;
+    align-items: baseline;
     padding: 4px 8px;
     margin: 0;
     min-height: 24px;
+    line-height: 1.6;
   }
 
   .line-diff {
-    background-color: #fef3c7;
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(251, 191, 36, 0.15)' : '#fef3c7'};
   }
 
   .line-same {
@@ -158,11 +154,14 @@ export const ValueContent = styled.pre`
   }
 
   mark {
-    background-color: #fbbf24;
-    color: #000000;
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? '#fbbf24' : '#fbbf24'};
+    color: ${({ theme }) => theme.colors.background === '#111827' ? '#000000' : '#000000'};
     padding: 2px 4px;
     border-radius: 2px;
     font-weight: 700;
+    display: inline;
+    vertical-align: baseline;
+    line-height: inherit;
   }
 `;
 
@@ -206,5 +205,107 @@ export const EmptyState = styled.div`
     height: 48px;
     margin-bottom: 16px;
     opacity: 0.5;
+  }
+`;
+
+export const StatisticsRow = styled.div`
+  display: flex;
+  gap: 12px;
+  padding: 16px 20px;
+  background: ${({ theme }) => theme.colors.gray[50]};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  flex-wrap: wrap;
+  transition: all 0.3s ease;
+
+  @media (max-width: 768px) {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+`;
+
+export const StatisticBadge = styled.div<{ $type: 'added' | 'removed' | 'modified' }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  background: ${({ $type }) => {
+    if ($type === 'added') return '#10b981';
+    if ($type === 'removed') return '#ef4444';
+    return '#f97316'; // Orange for modified
+  }};
+  color: white;
+  border: 2px solid ${({ $type }) => {
+    if ($type === 'added') return '#059669';
+    if ($type === 'removed') return '#dc2626';
+    return '#ea580c'; // Darker orange for modified
+  }};
+  transition: all 0.2s ease;
+
+  @media (max-width: 768px) {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+`;
+
+export const FilterRow = styled.div`
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  background: ${({ theme }) => theme.colors.background};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  flex-wrap: wrap;
+  align-items: center;
+  transition: all 0.3s ease;
+
+  @media (max-width: 768px) {
+    padding: 10px 16px;
+    gap: 6px;
+  }
+`;
+
+export const FilterLabel = styled.span`
+  font-size: 13px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.subtleText};
+  margin-right: 4px;
+  transition: color 0.3s ease;
+
+  @media (max-width: 768px) {
+    font-size: 12px;
+  }
+`;
+
+export const FilterPill = styled.button<{ $type: 'added' | 'removed' | 'modified'; $active: boolean }>`
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 2px solid ${({ $type, $active }) => {
+    if (!$active) return '#d1d5db';
+    if ($type === 'added') return '#10b981';
+    if ($type === 'removed') return '#ef4444';
+    return '#f97316';
+  }};
+  background: ${({ $type, $active }) => {
+    if (!$active) return 'transparent';
+    if ($type === 'added') return '#10b981';
+    if ($type === 'removed') return '#ef4444';
+    return '#f97316';
+  }};
+  color: ${({ $active, theme }) => ($active ? 'white' : theme.colors.text)};
+  transition: all 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+
+  @media (max-width: 768px) {
+    padding: 5px 12px;
+    font-size: 11px;
   }
 `;

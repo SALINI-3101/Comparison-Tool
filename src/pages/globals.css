@@ -9,13 +9,18 @@ html, body, #__next {
 /* Prevent theme flash by applying colors immediately based on data-theme */
 html[data-theme="light"],
 html:not([data-theme]) {
-  background: #f9fafb;
+  background-color: #f9fafb !important;
   color-scheme: light;
 }
 
 html[data-theme="dark"] {
-  background: #111827;
+  background-color: #111827 !important;
   color-scheme: dark;
+}
+
+/* Ensure body inherits the background */
+body {
+  background-color: transparent;
 }
 
 body {

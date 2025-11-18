@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useRef } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import Head from 'next/head';
 import { Tabs, TabItem } from '@/components/Tabs';
 import { TextArea } from '@/components/TextArea';
@@ -6,7 +6,7 @@ import { Toggle } from '@/components/Toggle';
 import { ResultsPanel } from '@/components/ResultsPanel';
 import { FileUpload } from '@/components/FileUpload';
 import { LoadingOverlay } from '@/components/LoadingOverlay';
-import { RefreshIcon, PlayIcon, CompareIcon, SunIcon, MoonIcon, DownloadIcon } from '@/components/Icons';
+import { RefreshIcon, PlayIcon, CompareIcon, SunIcon, MoonIcon, DownloadIcon, CopyIcon, ClipboardIcon } from '@/components/Icons';
 import { useToast } from '@/components/Toast';
 import {
   PageContainer,
@@ -20,8 +20,6 @@ import {
   ClearButton,
   Content,
   Card,
-  TabsAndClearRow,
-  TabsWrapper,
   InputSection,
   SectionTitle,
   OptionsRow,
@@ -43,30 +41,29 @@ import {
 
 export default function ComparisonTool() {
   const { themeMode, toggleTheme } = useContext(ThemeContext);
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
 
-  // Load saved content from localStorage on mount
-  const loadFromLocalStorage = (key: string, defaultValue: string = ''): string => {
-    if (typeof window === 'undefined') return defaultValue;
+  // Helper function to save to localStorage
+  const saveToLocalStorage = (key: string, value: string) => {
+    if (typeof window === 'undefined') return;
     try {
-      const saved = localStorage.getItem(key);
-      return saved !== null ? saved : defaultValue;
+      localStorage.setItem(key, value);
     } catch {
-      return defaultValue;
+      // Silently fail - localStorage might be disabled
     }
   };
 
   // State for validate modes (separate for each type)
-  const [jsonValidateContent, setJsonValidateContent] = useState(() => loadFromLocalStorage('jsonValidateContent'));
-  const [xmlValidateContent, setXmlValidateContent] = useState(() => loadFromLocalStorage('xmlValidateContent'));
+  const [jsonValidateContent, setJsonValidateContent] = useState('');
+  const [xmlValidateContent, setXmlValidateContent] = useState('');
 
   // State for compare modes (separate for each type)
-  const [jsonCompareLeft, setJsonCompareLeft] = useState(() => loadFromLocalStorage('jsonCompareLeft'));
-  const [jsonCompareRight, setJsonCompareRight] = useState(() => loadFromLocalStorage('jsonCompareRight'));
-  const [xmlCompareLeft, setXmlCompareLeft] = useState(() => loadFromLocalStorage('xmlCompareLeft'));
-  const [xmlCompareRight, setXmlCompareRight] = useState(() => loadFromLocalStorage('xmlCompareRight'));
-  const [textCompareLeft, setTextCompareLeft] = useState(() => loadFromLocalStorage('textCompareLeft'));
-  const [textCompareRight, setTextCompareRight] = useState(() => loadFromLocalStorage('textCompareRight'));
+  const [jsonCompareLeft, setJsonCompareLeft] = useState('');
+  const [jsonCompareRight, setJsonCompareRight] = useState('');
+  const [xmlCompareLeft, setXmlCompareLeft] = useState('');
+  const [xmlCompareRight, setXmlCompareRight] = useState('');
+  const [textCompareLeft, setTextCompareLeft] = useState('');
+  const [textCompareRight, setTextCompareRight] = useState('');
 
   // State for options
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(true);
@@ -75,86 +72,148 @@ export default function ComparisonTool() {
   const [ignoreArrayOrder, setIgnoreArrayOrder] = useState(false);
   const [ignoreAttributeOrder, setIgnoreAttributeOrder] = useState(false);
 
+  // State for active tab
+  const [activeTab, setActiveTab] = useState('json-validate');
+
+  // Load from localStorage after component mounts (client-side only)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedJsonValidate = localStorage.getItem('jsonValidateContent');
+        const savedXmlValidate = localStorage.getItem('xmlValidateContent');
+        const savedJsonLeft = localStorage.getItem('jsonCompareLeft');
+        const savedJsonRight = localStorage.getItem('jsonCompareRight');
+        const savedXmlLeft = localStorage.getItem('xmlCompareLeft');
+        const savedXmlRight = localStorage.getItem('xmlCompareRight');
+        const savedTextLeft = localStorage.getItem('textCompareLeft');
+        const savedTextRight = localStorage.getItem('textCompareRight');
+        const savedTab = localStorage.getItem('activeTab');
+
+        // Load toggle states
+        const savedIgnoreWhitespace = localStorage.getItem('ignoreWhitespace');
+        const savedCaseSensitive = localStorage.getItem('caseSensitive');
+        const savedIgnoreKeyOrder = localStorage.getItem('ignoreKeyOrder');
+        const savedIgnoreArrayOrder = localStorage.getItem('ignoreArrayOrder');
+        const savedIgnoreAttributeOrder = localStorage.getItem('ignoreAttributeOrder');
+
+        if (savedJsonValidate) setJsonValidateContent(savedJsonValidate);
+        if (savedXmlValidate) setXmlValidateContent(savedXmlValidate);
+        if (savedJsonLeft) setJsonCompareLeft(savedJsonLeft);
+        if (savedJsonRight) setJsonCompareRight(savedJsonRight);
+        if (savedXmlLeft) setXmlCompareLeft(savedXmlLeft);
+        if (savedXmlRight) setXmlCompareRight(savedXmlRight);
+        if (savedTextLeft) setTextCompareLeft(savedTextLeft);
+        if (savedTextRight) setTextCompareRight(savedTextRight);
+        if (savedTab) setActiveTab(savedTab);
+
+        // Set toggle states with defaults if not saved
+        if (savedIgnoreWhitespace !== null) setIgnoreWhitespace(savedIgnoreWhitespace === 'true');
+        if (savedCaseSensitive !== null) setCaseSensitive(savedCaseSensitive === 'true');
+        if (savedIgnoreKeyOrder !== null) setIgnoreKeyOrder(savedIgnoreKeyOrder === 'true');
+        if (savedIgnoreArrayOrder !== null) setIgnoreArrayOrder(savedIgnoreArrayOrder === 'true');
+        if (savedIgnoreAttributeOrder !== null) setIgnoreAttributeOrder(savedIgnoreAttributeOrder === 'true');
+      } catch {
+        // Silently fail - localStorage might be disabled
+      }
+    }
+  }, []);
+
   // State for results
   const [validationResult, setValidationResult] = useState<ValidationResult | undefined>(undefined);
-  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | undefined>(undefined);
+  const [jsonComparisonResult, setJsonComparisonResult] = useState<ComparisonResult | undefined>(undefined);
+  const [xmlComparisonResult, setXmlComparisonResult] = useState<ComparisonResult | undefined>(undefined);
+  const [textComparisonResult, setTextComparisonResult] = useState<ComparisonResult | undefined>(undefined);
 
   // State for loading
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
 
-  // Save to localStorage when user performs actions (not on every keystroke)
-  const saveToLocalStorage = () => {
-    if (jsonValidateContent) localStorage.setItem('jsonValidateContent', jsonValidateContent);
-    if (xmlValidateContent) localStorage.setItem('xmlValidateContent', xmlValidateContent);
-    if (jsonCompareLeft) localStorage.setItem('jsonCompareLeft', jsonCompareLeft);
-    if (jsonCompareRight) localStorage.setItem('jsonCompareRight', jsonCompareRight);
-    if (xmlCompareLeft) localStorage.setItem('xmlCompareLeft', xmlCompareLeft);
-    if (xmlCompareRight) localStorage.setItem('xmlCompareRight', xmlCompareRight);
-    if (textCompareLeft) localStorage.setItem('textCompareLeft', textCompareLeft);
-    if (textCompareRight) localStorage.setItem('textCompareRight', textCompareRight);
-  };
-
-  // Use refs to store latest values without causing re-renders
-  const contentRefs = useRef({
-    jsonValidateContent: '',
-    xmlValidateContent: '',
-    jsonCompareLeft: '',
-    jsonCompareRight: '',
-    xmlCompareLeft: '',
-    xmlCompareRight: '',
-    textCompareLeft: '',
-    textCompareRight: '',
-  });
-
-  // Update refs when content changes (this doesn't cause re-renders)
-  contentRefs.current = {
-    jsonValidateContent,
-    xmlValidateContent,
-    jsonCompareLeft,
-    jsonCompareRight,
-    xmlCompareLeft,
-    xmlCompareRight,
-    textCompareLeft,
-    textCompareRight,
-  };
-
-  // Save to localStorage before page unload (F5 refresh, close tab, etc.)
-  // This only runs once on mount, not on every state change
+  // Auto-save to localStorage whenever content changes
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      const content = contentRefs.current;
-      if (content.jsonValidateContent) localStorage.setItem('jsonValidateContent', content.jsonValidateContent);
-      else localStorage.removeItem('jsonValidateContent');
+    saveToLocalStorage('jsonValidateContent', jsonValidateContent);
+    if (!jsonValidateContent) {
+      setValidationResult(undefined);
+    }
+  }, [jsonValidateContent]);
 
-      if (content.xmlValidateContent) localStorage.setItem('xmlValidateContent', content.xmlValidateContent);
-      else localStorage.removeItem('xmlValidateContent');
+  useEffect(() => {
+    saveToLocalStorage('xmlValidateContent', xmlValidateContent);
+    if (!xmlValidateContent) {
+      setValidationResult(undefined);
+    }
+  }, [xmlValidateContent]);
 
-      if (content.jsonCompareLeft) localStorage.setItem('jsonCompareLeft', content.jsonCompareLeft);
-      else localStorage.removeItem('jsonCompareLeft');
+  useEffect(() => {
+    saveToLocalStorage('jsonCompareLeft', jsonCompareLeft);
+  }, [jsonCompareLeft]);
 
-      if (content.jsonCompareRight) localStorage.setItem('jsonCompareRight', content.jsonCompareRight);
-      else localStorage.removeItem('jsonCompareRight');
+  useEffect(() => {
+    saveToLocalStorage('jsonCompareRight', jsonCompareRight);
+  }, [jsonCompareRight]);
 
-      if (content.xmlCompareLeft) localStorage.setItem('xmlCompareLeft', content.xmlCompareLeft);
-      else localStorage.removeItem('xmlCompareLeft');
+  useEffect(() => {
+    saveToLocalStorage('xmlCompareLeft', xmlCompareLeft);
+  }, [xmlCompareLeft]);
 
-      if (content.xmlCompareRight) localStorage.setItem('xmlCompareRight', content.xmlCompareRight);
-      else localStorage.removeItem('xmlCompareRight');
+  useEffect(() => {
+    saveToLocalStorage('xmlCompareRight', xmlCompareRight);
+  }, [xmlCompareRight]);
 
-      if (content.textCompareLeft) localStorage.setItem('textCompareLeft', content.textCompareLeft);
-      else localStorage.removeItem('textCompareLeft');
+  useEffect(() => {
+    saveToLocalStorage('textCompareLeft', textCompareLeft);
+  }, [textCompareLeft]);
 
-      if (content.textCompareRight) localStorage.setItem('textCompareRight', content.textCompareRight);
-      else localStorage.removeItem('textCompareRight');
-    };
+  useEffect(() => {
+    saveToLocalStorage('textCompareRight', textCompareRight);
+  }, [textCompareRight]);
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []); // Empty dependency array - only run once on mount
+  useEffect(() => {
+    saveToLocalStorage('activeTab', activeTab);
+  }, [activeTab]);
+
+  // Save toggle states to localStorage
+  useEffect(() => {
+    saveToLocalStorage('ignoreWhitespace', String(ignoreWhitespace));
+  }, [ignoreWhitespace]);
+
+  useEffect(() => {
+    saveToLocalStorage('caseSensitive', String(caseSensitive));
+  }, [caseSensitive]);
+
+  useEffect(() => {
+    saveToLocalStorage('ignoreKeyOrder', String(ignoreKeyOrder));
+  }, [ignoreKeyOrder]);
+
+  useEffect(() => {
+    saveToLocalStorage('ignoreArrayOrder', String(ignoreArrayOrder));
+  }, [ignoreArrayOrder]);
+
+  useEffect(() => {
+    saveToLocalStorage('ignoreAttributeOrder', String(ignoreAttributeOrder));
+  }, [ignoreAttributeOrder]);
+
+  // Clear JSON comparison result when both JSON compare fields become empty
+  useEffect(() => {
+    if (!jsonCompareLeft && !jsonCompareRight) {
+      setJsonComparisonResult(undefined);
+    }
+  }, [jsonCompareLeft, jsonCompareRight]);
+
+  // Clear XML comparison result when both XML compare fields become empty
+  useEffect(() => {
+    if (!xmlCompareLeft && !xmlCompareRight) {
+      setXmlComparisonResult(undefined);
+    }
+  }, [xmlCompareLeft, xmlCompareRight]);
+
+  // Clear text comparison result when both text compare fields become empty
+  useEffect(() => {
+    if (!textCompareLeft && !textCompareRight) {
+      setTextComparisonResult(undefined);
+    }
+  }, [textCompareLeft, textCompareRight]);
 
   const handleClearAll = () => {
-    // Clear state
     setJsonValidateContent('');
     setXmlValidateContent('');
     setJsonCompareLeft('');
@@ -164,23 +223,24 @@ export default function ComparisonTool() {
     setTextCompareLeft('');
     setTextCompareRight('');
     setValidationResult(undefined);
-    setComparisonResult(undefined);
+    setJsonComparisonResult(undefined);
+    setXmlComparisonResult(undefined);
+    setTextComparisonResult(undefined);
 
-    // Clear localStorage
-    localStorage.removeItem('jsonValidateContent');
-    localStorage.removeItem('xmlValidateContent');
-    localStorage.removeItem('jsonCompareLeft');
-    localStorage.removeItem('jsonCompareRight');
-    localStorage.removeItem('xmlCompareLeft');
-    localStorage.removeItem('xmlCompareRight');
-    localStorage.removeItem('textCompareLeft');
-    localStorage.removeItem('textCompareRight');
+    // Clear all from localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('jsonValidateContent');
+      localStorage.removeItem('xmlValidateContent');
+      localStorage.removeItem('jsonCompareLeft');
+      localStorage.removeItem('jsonCompareRight');
+      localStorage.removeItem('xmlCompareLeft');
+      localStorage.removeItem('xmlCompareRight');
+      localStorage.removeItem('textCompareLeft');
+      localStorage.removeItem('textCompareRight');
+    }
   };
 
   const handleValidateJSON = () => {
-    // Save to localStorage before validating
-    saveToLocalStorage();
-
     // Warn about large content
     const sizeInMB = new Blob([jsonValidateContent]).size / (1024 * 1024);
     if (sizeInMB > 0.5) {
@@ -199,7 +259,9 @@ export default function ComparisonTool() {
         try {
           const result = validateJSON(jsonValidateContent);
           setValidationResult(result);
-          setComparisonResult(undefined);
+          setJsonComparisonResult(undefined);
+          setXmlComparisonResult(undefined);
+          setTextComparisonResult(undefined);
         } finally {
           setIsProcessing(false);
           setProcessingMessage('');
@@ -209,9 +271,6 @@ export default function ComparisonTool() {
   };
 
   const handleValidateXML = () => {
-    // Save to localStorage before validating
-    saveToLocalStorage();
-
     // Warn about large content
     const sizeInMB = new Blob([xmlValidateContent]).size / (1024 * 1024);
     if (sizeInMB > 0.5) {
@@ -229,7 +288,9 @@ export default function ComparisonTool() {
         try {
           const result = validateXML(xmlValidateContent);
           setValidationResult(result);
-          setComparisonResult(undefined);
+          setJsonComparisonResult(undefined);
+          setXmlComparisonResult(undefined);
+          setTextComparisonResult(undefined);
         } finally {
           setIsProcessing(false);
           setProcessingMessage('');
@@ -239,9 +300,6 @@ export default function ComparisonTool() {
   };
 
   const handleCompareJSON = () => {
-    // Save to localStorage before comparing
-    saveToLocalStorage();
-
     // Warn about large content
     const totalSize = (new Blob([jsonCompareLeft]).size + new Blob([jsonCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -263,7 +321,7 @@ export default function ComparisonTool() {
             ignoreKeyOrder,
             ignoreArrayOrder,
           });
-          setComparisonResult(result);
+          setJsonComparisonResult(result);
           setValidationResult(undefined);
         } finally {
           setIsProcessing(false);
@@ -274,9 +332,6 @@ export default function ComparisonTool() {
   };
 
   const handleCompareXML = () => {
-    // Save to localStorage before comparing
-    saveToLocalStorage();
-
     // Warn about large content
     const totalSize = (new Blob([xmlCompareLeft]).size + new Blob([xmlCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -297,7 +352,7 @@ export default function ComparisonTool() {
             caseSensitive,
             ignoreAttributeOrder,
           });
-          setComparisonResult(result);
+          setXmlComparisonResult(result);
           setValidationResult(undefined);
         } finally {
           setIsProcessing(false);
@@ -308,9 +363,6 @@ export default function ComparisonTool() {
   };
 
   const handleCompareText = () => {
-    // Save to localStorage before comparing
-    saveToLocalStorage();
-
     // Warn about large content
     const totalSize = (new Blob([textCompareLeft]).size + new Blob([textCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -330,7 +382,7 @@ export default function ComparisonTool() {
             ignoreWhitespace,
             caseSensitive,
           });
-          setComparisonResult(result);
+          setTextComparisonResult(result);
           setValidationResult(undefined);
         } finally {
           setIsProcessing(false);
@@ -340,28 +392,13 @@ export default function ComparisonTool() {
     });
   };
 
-  const handleTabChange = () => {
-    // Clear all content and results when switching tabs
-    setJsonValidateContent('');
-    setXmlValidateContent('');
-    setJsonCompareLeft('');
-    setJsonCompareRight('');
-    setXmlCompareLeft('');
-    setXmlCompareRight('');
-    setTextCompareLeft('');
-    setTextCompareRight('');
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    // Clear results when switching tabs
     setValidationResult(undefined);
-    setComparisonResult(undefined);
-
-    // Clear localStorage
-    localStorage.removeItem('jsonValidateContent');
-    localStorage.removeItem('xmlValidateContent');
-    localStorage.removeItem('jsonCompareLeft');
-    localStorage.removeItem('jsonCompareRight');
-    localStorage.removeItem('xmlCompareLeft');
-    localStorage.removeItem('xmlCompareRight');
-    localStorage.removeItem('textCompareLeft');
-    localStorage.removeItem('textCompareRight');
+    setJsonComparisonResult(undefined);
+    setXmlComparisonResult(undefined);
+    setTextComparisonResult(undefined);
   };
 
   // Download handlers
@@ -375,6 +412,28 @@ export default function ComparisonTool() {
     downloadContent(xmlValidateContent, `xml-validate-${timestamp}.xml`, 'xml');
   };
 
+  const handleCopyToClipboard = async (content: string, label: string = 'Content') => {
+    try {
+      await navigator.clipboard.writeText(content);
+      showSuccess('Copied!', `${label} copied to clipboard successfully`);
+    } catch {
+      showError('Copy Failed', 'Failed to copy content to clipboard');
+    }
+  };
+
+  const handlePasteFromClipboard = async (setter: (content: string) => void, label: string = 'Content') => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setter(text);
+        showSuccess('Pasted!', `${label} pasted from clipboard successfully`);
+      } else {
+        showError('Paste Failed', 'Clipboard is empty');
+      }
+    } catch {
+      showError('Paste Failed', 'Failed to read from clipboard. Please use Ctrl+V or Cmd+V instead.');
+    }
+  };
 
   // Reset handlers
   const handleResetJSONValidate = () => {
@@ -390,19 +449,19 @@ export default function ComparisonTool() {
   const handleResetJSONCompare = () => {
     setJsonCompareLeft('');
     setJsonCompareRight('');
-    setComparisonResult(undefined);
+    setJsonComparisonResult(undefined);
   };
 
   const handleResetXMLCompare = () => {
     setXmlCompareLeft('');
     setXmlCompareRight('');
-    setComparisonResult(undefined);
+    setXmlComparisonResult(undefined);
   };
 
   const handleResetTextCompare = () => {
     setTextCompareLeft('');
     setTextCompareRight('');
-    setComparisonResult(undefined);
+    setTextComparisonResult(undefined);
   };
 
   const tabs: TabItem[] = [
@@ -414,17 +473,25 @@ export default function ComparisonTool() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <SectionTitle style={{ margin: 0, paddingTop: '8px' }}>Input Content</SectionTitle>
             <ValidateButtonGroup>
-              <ActionButton variant="primary" onClick={handleValidateJSON}>
-                <PlayIcon />
-                Validate
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setJsonValidateContent, 'JSON content')}>
+                <ClipboardIcon />
+                Paste
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleDownloadJSON} disabled={!jsonValidateContent}>
+              <ActionButton $variant="secondary" onClick={() => handleCopyToClipboard(jsonValidateContent, 'JSON content')} disabled={!jsonValidateContent}>
+                <CopyIcon />
+                Copy
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={handleDownloadJSON} disabled={!jsonValidateContent}>
                 <DownloadIcon />
                 Download
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleResetJSONValidate} disabled={!jsonValidateContent}>
+              <ActionButton $variant="secondary" onClick={handleResetJSONValidate} disabled={!jsonValidateContent}>
                 <RefreshIcon />
                 Reset
+              </ActionButton>
+              <ActionButton $variant="primary" onClick={handleValidateJSON} disabled={!jsonValidateContent}>
+                <PlayIcon />
+                Check Format
               </ActionButton>
             </ValidateButtonGroup>
           </div>
@@ -460,13 +527,36 @@ export default function ComparisonTool() {
               <Toggle label="Ignore Array Order" checked={ignoreArrayOrder} onChange={setIgnoreArrayOrder} />
             </div>
             <ValidateButtonGroup>
-              <ActionButton variant="primary" onClick={handleCompareJSON}>
-                <CompareIcon />
-                Compare
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setJsonCompareLeft, 'Left content')}>
+                <ClipboardIcon />
+                Paste Left
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleResetJSONCompare} disabled={!jsonCompareLeft && !jsonCompareRight}>
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setJsonCompareRight, 'Right content')}>
+                <ClipboardIcon />
+                Paste Right
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={() => {
+                const combinedContent = `Left:\n${jsonCompareLeft}\n\nRight:\n${jsonCompareRight}`;
+                handleCopyToClipboard(combinedContent, 'JSON comparison');
+              }} disabled={!jsonCompareLeft && !jsonCompareRight}>
+                <CopyIcon />
+                Copy
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={() => {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                const combinedContent = `Left:\n${jsonCompareLeft}\n\nRight:\n${jsonCompareRight}`;
+                downloadContent(combinedContent, `json-comparison-${timestamp}.json`, 'json');
+              }} disabled={!jsonCompareLeft && !jsonCompareRight}>
+                <DownloadIcon />
+                Download
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={handleResetJSONCompare} disabled={!jsonCompareLeft && !jsonCompareRight}>
                 <RefreshIcon />
                 Reset
+              </ActionButton>
+              <ActionButton $variant="primary" onClick={handleCompareJSON} disabled={!jsonCompareLeft || !jsonCompareRight}>
+                <CompareIcon />
+                Spot Differences
               </ActionButton>
             </ValidateButtonGroup>
           </OptionsRow>
@@ -507,7 +597,7 @@ export default function ComparisonTool() {
               </div>
             </DualEditorContainer>
           </InputSection>
-          {comparisonResult && <ResultsPanel comparisonResult={comparisonResult} />}
+          {jsonComparisonResult && <ResultsPanel comparisonResult={jsonComparisonResult} />}
         </>
       ),
     },
@@ -519,17 +609,25 @@ export default function ComparisonTool() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <SectionTitle style={{ margin: 0, paddingTop: '8px' }}>Input Content</SectionTitle>
             <ValidateButtonGroup>
-              <ActionButton variant="primary" onClick={handleValidateXML}>
-                <PlayIcon />
-                Validate
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setXmlValidateContent, 'XML content')}>
+                <ClipboardIcon />
+                Paste
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleDownloadXML} disabled={!xmlValidateContent}>
+              <ActionButton $variant="secondary" onClick={() => handleCopyToClipboard(xmlValidateContent, 'XML content')} disabled={!xmlValidateContent}>
+                <CopyIcon />
+                Copy
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={handleDownloadXML} disabled={!xmlValidateContent}>
                 <DownloadIcon />
                 Download
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleResetXMLValidate} disabled={!xmlValidateContent}>
+              <ActionButton $variant="secondary" onClick={handleResetXMLValidate} disabled={!xmlValidateContent}>
                 <RefreshIcon />
                 Reset
+              </ActionButton>
+              <ActionButton $variant="primary" onClick={handleValidateXML} disabled={!xmlValidateContent}>
+                <PlayIcon />
+                Check Format
               </ActionButton>
             </ValidateButtonGroup>
           </div>
@@ -564,13 +662,36 @@ export default function ComparisonTool() {
               <Toggle label="Ignore Attribute Order" checked={ignoreAttributeOrder} onChange={setIgnoreAttributeOrder} />
             </div>
             <ValidateButtonGroup>
-              <ActionButton variant="primary" onClick={handleCompareXML}>
-                <CompareIcon />
-                Compare
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setXmlCompareLeft, 'Left content')}>
+                <ClipboardIcon />
+                Paste Left
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleResetXMLCompare} disabled={!xmlCompareLeft && !xmlCompareRight}>
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setXmlCompareRight, 'Right content')}>
+                <ClipboardIcon />
+                Paste Right
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={() => {
+                const combinedContent = `Left:\n${xmlCompareLeft}\n\nRight:\n${xmlCompareRight}`;
+                handleCopyToClipboard(combinedContent, 'XML comparison');
+              }} disabled={!xmlCompareLeft && !xmlCompareRight}>
+                <CopyIcon />
+                Copy
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={() => {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                const combinedContent = `Left:\n${xmlCompareLeft}\n\nRight:\n${xmlCompareRight}`;
+                downloadContent(combinedContent, `xml-comparison-${timestamp}.xml`, 'xml');
+              }} disabled={!xmlCompareLeft && !xmlCompareRight}>
+                <DownloadIcon />
+                Download
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={handleResetXMLCompare} disabled={!xmlCompareLeft && !xmlCompareRight}>
                 <RefreshIcon />
                 Reset
+              </ActionButton>
+              <ActionButton $variant="primary" onClick={handleCompareXML} disabled={!xmlCompareLeft || !xmlCompareRight}>
+                <CompareIcon />
+                Spot Differences
               </ActionButton>
             </ValidateButtonGroup>
           </OptionsRow>
@@ -611,7 +732,7 @@ export default function ComparisonTool() {
               </div>
             </DualEditorContainer>
           </InputSection>
-          {comparisonResult && <ResultsPanel comparisonResult={comparisonResult} />}
+          {xmlComparisonResult && <ResultsPanel comparisonResult={xmlComparisonResult} />}
         </>
       ),
     },
@@ -626,13 +747,36 @@ export default function ComparisonTool() {
               <Toggle label="Case Sensitive" checked={caseSensitive} onChange={setCaseSensitive} />
             </div>
             <ValidateButtonGroup>
-              <ActionButton variant="primary" onClick={handleCompareText}>
-                <CompareIcon />
-                Compare
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setTextCompareLeft, 'Left content')}>
+                <ClipboardIcon />
+                Paste Left
               </ActionButton>
-              <ActionButton variant="secondary" onClick={handleResetTextCompare} disabled={!textCompareLeft && !textCompareRight}>
+              <ActionButton $variant="secondary" onClick={() => handlePasteFromClipboard(setTextCompareRight, 'Right content')}>
+                <ClipboardIcon />
+                Paste Right
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={() => {
+                const combinedContent = `Left:\n${textCompareLeft}\n\nRight:\n${textCompareRight}`;
+                handleCopyToClipboard(combinedContent, 'Text comparison');
+              }} disabled={!textCompareLeft && !textCompareRight}>
+                <CopyIcon />
+                Copy
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={() => {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                const combinedContent = `Left:\n${textCompareLeft}\n\nRight:\n${textCompareRight}`;
+                downloadContent(combinedContent, `text-comparison-${timestamp}.txt`, 'txt');
+              }} disabled={!textCompareLeft && !textCompareRight}>
+                <DownloadIcon />
+                Download
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={handleResetTextCompare} disabled={!textCompareLeft && !textCompareRight}>
                 <RefreshIcon />
                 Reset
+              </ActionButton>
+              <ActionButton $variant="primary" onClick={handleCompareText} disabled={!textCompareLeft || !textCompareRight}>
+                <CompareIcon />
+                Spot Differences
               </ActionButton>
             </ValidateButtonGroup>
           </OptionsRow>
@@ -673,7 +817,7 @@ export default function ComparisonTool() {
               </div>
             </DualEditorContainer>
           </InputSection>
-          {comparisonResult && <ResultsPanel comparisonResult={comparisonResult} />}
+          {textComparisonResult && <ResultsPanel comparisonResult={textComparisonResult} />}
         </>
       ),
     },
@@ -702,19 +846,15 @@ export default function ComparisonTool() {
             <ThemeToggleButton onClick={toggleTheme}>
               {themeMode === 'light' ? <MoonIcon /> : <SunIcon />}
             </ThemeToggleButton>
+            <ClearButton onClick={handleClearAll}>
+              <RefreshIcon />
+              Clear All
+            </ClearButton>
           </HeaderContent>
         </Header>
         <Content>
           <Card>
-            <TabsAndClearRow>
-              <TabsWrapper>
-                <Tabs items={tabs} onChange={handleTabChange} />
-              </TabsWrapper>
-              <ClearButton onClick={handleClearAll}>
-                <RefreshIcon />
-                Clear All
-              </ClearButton>
-            </TabsAndClearRow>
+            <Tabs items={tabs} activeKey={activeTab} onChange={handleTabChange} />
           </Card>
         </Content>
       </PageContainer>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ResultsContainer,
   ResultsHeader,
@@ -12,6 +12,11 @@ import {
   ValueContent,
   ErrorMessage,
   SuccessMessage,
+  StatisticsRow,
+  StatisticBadge,
+  FilterRow,
+  FilterLabel,
+  FilterPill,
 } from './ResultsPanel.styles';
 import { ValidationResult, ComparisonResult } from '@/utils/comparison';
 
@@ -49,6 +54,20 @@ const InfoIcon = () => (
 );
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, comparisonResult }) => {
+  const [activeFilters, setActiveFilters] = useState<Set<'added' | 'removed' | 'modified'>>(
+    new Set(['added', 'removed', 'modified'])
+  );
+
+  const toggleFilter = (filter: 'added' | 'removed' | 'modified') => {
+    const newFilters = new Set(activeFilters);
+    if (newFilters.has(filter)) {
+      newFilters.delete(filter);
+    } else {
+      newFilters.add(filter);
+    }
+    setActiveFilters(newFilters);
+  };
+
   if (validationResult) {
     const status = validationResult.isValid ? 'success' : 'error';
     const Icon = validationResult.isValid ? CheckIcon : ErrorIcon;
@@ -80,20 +99,62 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, co
   if (comparisonResult) {
     const status = comparisonResult.areEqual ? 'success' : 'info';
     const Icon = comparisonResult.areEqual ? CheckIcon : InfoIcon;
+    const statistics = comparisonResult.statistics || { added: 0, removed: 0, modified: 0 };
+    const hasStatistics = statistics.added > 0 || statistics.removed > 0 || statistics.modified > 0;
 
     return (
       <ResultsContainer>
         <ResultsHeader $status={status}>
           <Icon />
-          {comparisonResult.message}
+          {comparisonResult.areEqual ? 'Both contents are identical' : comparisonResult.message}
         </ResultsHeader>
+        {hasStatistics && (
+          <>
+            <StatisticsRow>
+              {statistics.added > 0 && (
+                <StatisticBadge $type="added">
+                  Added: {statistics.added}
+                </StatisticBadge>
+              )}
+              {statistics.removed > 0 && (
+                <StatisticBadge $type="removed">
+                  Removed: {statistics.removed}
+                </StatisticBadge>
+              )}
+              {statistics.modified > 0 && (
+                <StatisticBadge $type="modified">
+                  Modified: {statistics.modified}
+                </StatisticBadge>
+              )}
+            </StatisticsRow>
+            <FilterRow>
+              <FilterLabel>Filter:</FilterLabel>
+              <FilterPill
+                $type="added"
+                $active={activeFilters.has('added')}
+                onClick={() => toggleFilter('added')}
+              >
+                Added
+              </FilterPill>
+              <FilterPill
+                $type="removed"
+                $active={activeFilters.has('removed')}
+                onClick={() => toggleFilter('removed')}
+              >
+                Removed
+              </FilterPill>
+              <FilterPill
+                $type="modified"
+                $active={activeFilters.has('modified')}
+                onClick={() => toggleFilter('modified')}
+              >
+                Modified
+              </FilterPill>
+            </FilterRow>
+          </>
+        )}
         <ResultsBody>
-          {comparisonResult.areEqual ? (
-            <SuccessMessage>
-              <CheckIcon />
-              Both contents are identical
-            </SuccessMessage>
-          ) : (
+          {comparisonResult.areEqual ? null : (
             <>
               {comparisonResult.differences.map((diff, index) => {
                 // Format the value based on type

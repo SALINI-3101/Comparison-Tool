@@ -92,14 +92,14 @@ export default function ComparisonTool() {
   // State for storage size
   const [storageSize, setStorageSize] = useState('0 KB');
 
-  // Function to calculate localStorage size (only for this app's keys)
+  // Function to calculate localStorage size (only content keys, exclude settings)
   const calculateStorageSize = () => {
     if (typeof window === 'undefined') return '0.00 KB';
     try {
       let totalSize = 0;
 
-      // List of keys used by this application
-      const appKeys = [
+      // Only count content keys (exclude toggle settings and activeTab)
+      const contentKeys = [
         'jsonValidateContent',
         'xmlValidateContent',
         'jsonCompareLeft',
@@ -107,17 +107,11 @@ export default function ComparisonTool() {
         'xmlCompareLeft',
         'xmlCompareRight',
         'textCompareLeft',
-        'textCompareRight',
-        'ignoreWhitespace',
-        'caseSensitive',
-        'ignoreKeyOrder',
-        'ignoreArrayOrder',
-        'ignoreAttributeOrder',
-        'activeTab'
+        'textCompareRight'
       ];
 
-      // Only count keys that belong to this application
-      for (const key of appKeys) {
+      // Only count content data
+      for (const key of contentKeys) {
         const value = localStorage.getItem(key);
         if (value !== null) {
           totalSize += value.length + key.length;
@@ -345,7 +339,14 @@ export default function ComparisonTool() {
     setXmlComparisonResult(undefined);
     setTextComparisonResult(undefined);
 
-    // Clear all from localStorage including toggle settings and active tab
+    // Reset toggle states to defaults
+    setIgnoreWhitespace(false);
+    setCaseSensitive(true); // Default ON
+    setIgnoreKeyOrder(false);
+    setIgnoreArrayOrder(false);
+    setIgnoreAttributeOrder(false);
+
+    // Clear all content from localStorage and reset toggles to defaults
     if (typeof window !== 'undefined') {
       localStorage.removeItem('jsonValidateContent');
       localStorage.removeItem('xmlValidateContent');
@@ -355,12 +356,13 @@ export default function ComparisonTool() {
       localStorage.removeItem('xmlCompareRight');
       localStorage.removeItem('textCompareLeft');
       localStorage.removeItem('textCompareRight');
-      localStorage.removeItem('ignoreWhitespace');
-      localStorage.removeItem('caseSensitive');
-      localStorage.removeItem('ignoreKeyOrder');
-      localStorage.removeItem('ignoreArrayOrder');
-      localStorage.removeItem('ignoreAttributeOrder');
-      localStorage.removeItem('activeTab');
+
+      // Set toggle states to defaults in localStorage
+      localStorage.setItem('ignoreWhitespace', 'false');
+      localStorage.setItem('caseSensitive', 'true');
+      localStorage.setItem('ignoreKeyOrder', 'false');
+      localStorage.setItem('ignoreArrayOrder', 'false');
+      localStorage.setItem('ignoreAttributeOrder', 'false');
 
       // Update storage size after clearing
       setStorageSize(calculateStorageSize());
@@ -1106,7 +1108,6 @@ export default function ComparisonTool() {
               {themeMode === 'light' ? <MoonIcon /> : <SunIcon />}
             </ThemeToggleButton>
             <ClearButton onClick={handleClearAll}>
-              <RefreshIcon />
               Clear All
             </ClearButton>
           </HeaderContent>

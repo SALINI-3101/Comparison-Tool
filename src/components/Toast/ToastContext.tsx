@@ -30,11 +30,27 @@ export const useToast = () => {
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const MAX_TOASTS = 3; // Maximum number of toasts to show at once
 
   const showToast = useCallback((type: ToastType, title: string, message?: string, duration: number = 5000) => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     const newToast: ToastItem = { id, type, title, message, duration };
-    setToasts((prev) => [...prev, newToast]);
+
+    setToasts((prev) => {
+      // Check if there's already a toast with the same title and message
+      const isDuplicate = prev.some(
+        (toast) => toast.title === title && toast.message === message && toast.type === type
+      );
+
+      // If duplicate exists and it's recent (within 500ms), don't add another
+      if (isDuplicate) {
+        return prev;
+      }
+
+      // Add new toast and keep only the last MAX_TOASTS toasts
+      const updatedToasts = [...prev, newToast];
+      return updatedToasts.slice(-MAX_TOASTS);
+    });
   }, []);
 
   const showSuccess = useCallback(

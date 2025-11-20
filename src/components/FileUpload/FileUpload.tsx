@@ -18,6 +18,7 @@ interface FileMetadata {
 export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedTypes = ['.json', '.xml', '.txt'], label, value = '', onError }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [fileMetadata, setFileMetadata] = useState<FileMetadata | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Check if value is empty - if so, don't show file metadata
   const isEmpty = value === '' || value === null || value === undefined;
@@ -78,6 +79,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
       return;
     }
 
+    // Set loading state to true
+    setIsLoading(true);
+
     // Use async file reading with Promise wrapper
     const readFileAsync = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
@@ -100,6 +104,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
         };
         setFileMetadata(metadata);
         onFileLoad(content, file.name, file.size, metadata.type);
+        setIsLoading(false); // Stop loading after file is processed
       }, 0);
     } catch {
       const errorMessage = 'Failed to read file. Please try again.';
@@ -108,6 +113,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
       } else {
         alert(errorMessage);
       }
+      setIsLoading(false); // Stop loading on error
     }
   }, [acceptedTypes, onFileLoad, onError, validateFile]);
 
@@ -155,7 +161,29 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
 
   return (
     <UploadContainer>
-      {!shouldShowMetadata ? (
+      {isLoading ? (
+        <DropZone $isDragging={false}>
+          <DropZoneText $isDragging={false}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center' }}>
+              <div style={{
+                width: '20px',
+                height: '20px',
+                border: '3px solid #e5e7eb',
+                borderTop: '3px solid #9333ea',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite'
+              }} />
+              <span>Loading file...</span>
+            </div>
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
+          </DropZoneText>
+        </DropZone>
+      ) : !shouldShowMetadata ? (
         <DropZone
           $isDragging={isDragging}
           onDragEnter={handleDragEnter}

@@ -428,3 +428,27 @@ export const ValidateButtonGroup = styled.div`
     gap: 6px;
   }
 `;
+
+export const StorageIndicator = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(59, 130, 246, 0.1)'};
+  border: 1px solid ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(59, 130, 246, 0.3)' : '#3b82f6'};
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.background === '#111827' ? '#60a5fa' : '#3b82f6'};
+  transition: all 0.3s ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  @media (max-width: 768px) {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+`;

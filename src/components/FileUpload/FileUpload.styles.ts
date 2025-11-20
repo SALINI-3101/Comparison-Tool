@@ -36,18 +36,18 @@ export const DropZoneText = styled.div<{ $isDragging: boolean }>`
 export const FileInfo = styled.div`
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   padding: 12px 16px;
   background-color: ${({ theme }) => theme.colors.gray[50]};
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radii.md};
   font-size: 13px;
   transition: all 0.3s ease;
-  flex-wrap: wrap;
   flex: 1;
+  min-width: 0;
 
   @media (max-width: 768px) {
-    gap: 8px;
+    gap: 6px;
     padding: 10px 12px;
     font-size: 12px;
   }
@@ -56,7 +56,16 @@ export const FileInfo = styled.div`
 export const FileInfoItem = styled.div`
   color: ${({ theme }) => theme.colors.text};
   transition: color 0.3s ease;
-  word-break: break-word;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:first-child {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+  }
 
   strong {
     font-weight: 600;
@@ -65,6 +74,10 @@ export const FileInfoItem = styled.div`
 
   @media (max-width: 768px) {
     font-size: 11px;
+
+    &:first-child {
+      max-width: 180px;
+    }
   }
 `;
 

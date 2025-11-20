@@ -44,9 +44,19 @@ export function validateJSON(content: string): ValidationResult {
 
   try {
     const parsed = JSON.parse(content);
+
+    // Check if the parsed result is an object or array (not primitive types)
+    if (typeof parsed !== 'object' || parsed === null) {
+      return {
+        isValid: false,
+        errors: ['JSON must be an object or array, not a primitive value'],
+        message: 'Invalid JSON',
+      };
+    }
+
     const lines = content.split('\n').length;
     const sizeInKB = (new Blob([content]).size / 1024).toFixed(2);
-    const type = Array.isArray(parsed) ? 'Array' : typeof parsed === 'object' ? 'Object' : typeof parsed;
+    const type = Array.isArray(parsed) ? 'Array' : 'Object';
 
     return {
       isValid: true,
@@ -126,41 +136,49 @@ export function compareJSON(
 
   try {
     // Parse to validate JSON
-    let leftObj = JSON.parse(leftContent);
-    let rightObj = JSON.parse(rightContent);
+    const leftObj = JSON.parse(leftContent);
+    const rightObj = JSON.parse(rightContent);
 
     let leftFormatted: string;
     let rightFormatted: string;
 
-    // Apply ignore key order option (sort object keys)
-    if (options.ignoreKeyOrder) {
-      leftObj = sortObjectKeys(leftObj);
-      rightObj = sortObjectKeys(rightObj);
-    }
+    // Check if any transformations need to be applied
+    const needsTransformation = options.ignoreKeyOrder || options.ignoreArrayOrder || options.ignoreWhitespace;
 
-    // Apply ignore array order option (sort arrays)
-    if (options.ignoreArrayOrder) {
-      leftObj = sortArrays(leftObj);
-      rightObj = sortArrays(rightObj);
-    }
+    if (needsTransformation) {
+      // Apply transformations
+      let leftTransformed = leftObj;
+      let rightTransformed = rightObj;
 
-    // When Ignore Whitespace is enabled, normalize formatting
-    // When disabled, preserve original formatting to detect whitespace differences
-    if (options.ignoreWhitespace) {
-      // Normalize formatting for both sides
-      leftFormatted = JSON.stringify(leftObj, null, 2);
-      rightFormatted = JSON.stringify(rightObj, null, 2);
-    } else {
-      // When ignoreWhitespace is OFF, use original content to preserve formatting
-      // But still need to apply key/array order transformations if enabled
-      if (options.ignoreKeyOrder || options.ignoreArrayOrder) {
-        leftFormatted = JSON.stringify(leftObj, null, 2);
-        rightFormatted = JSON.stringify(rightObj, null, 2);
-      } else {
-        // Preserve original formatting completely
-        leftFormatted = leftContent;
-        rightFormatted = rightContent;
+      // Apply key order transformation if requested
+      if (options.ignoreKeyOrder) {
+        leftTransformed = sortObjectKeys(leftTransformed);
+        rightTransformed = sortObjectKeys(rightTransformed);
       }
+
+      // Apply array order transformation if requested
+      if (options.ignoreArrayOrder) {
+        leftTransformed = sortArrays(leftTransformed);
+        rightTransformed = sortArrays(rightTransformed);
+      }
+
+      // Re-stringify based on ignoreWhitespace setting
+      if (options.ignoreWhitespace) {
+        // Normalize to pretty-printed format
+        leftFormatted = JSON.stringify(leftTransformed, null, 2);
+        rightFormatted = JSON.stringify(rightTransformed, null, 2);
+      } else {
+        // Preserve original format style (compact vs pretty-printed)
+        const leftIsCompact = !leftContent.includes('\n');
+        const rightIsCompact = !rightContent.includes('\n');
+
+        leftFormatted = leftIsCompact ? JSON.stringify(leftTransformed) : JSON.stringify(leftTransformed, null, 2);
+        rightFormatted = rightIsCompact ? JSON.stringify(rightTransformed) : JSON.stringify(rightTransformed, null, 2);
+      }
+    } else {
+      // No transformations - preserve original formatting exactly
+      leftFormatted = leftContent;
+      rightFormatted = rightContent;
     }
 
     // Split into lines for line-by-line comparison
@@ -1017,10 +1035,13 @@ function compareTextLines(
       diffLineNumbers.push(i);
 
       // Categorize the difference
+      // Count both added and removed to reflect both perspectives
       if (!leftLine && rightLine) {
-        addedCount++;
+        addedCount++; // Added to right (green on right)
+        removedCount++; // Missing from left (red on left)
       } else if (leftLine && !rightLine) {
-        removedCount++;
+        removedCount++; // Removed from right (red on right)
+        addedCount++; // Present on left (green on left)
       } else {
         modifiedCount++;
       }
@@ -1092,14 +1113,30 @@ function compareTextLines(
 
     const lineNum = i + 1;
 
+    // Check if line exists on both sides (treat empty strings as non-existent)
+    const leftExists = leftLines[i] !== undefined && leftLines[i] !== '';
+    const rightExists = rightLines[i] !== undefined && rightLines[i] !== '';
+
     // Check if lines are different
     if (leftCompare !== rightCompare) {
-      // Highlight the differences within the line
-      const highlightedLeft = highlightTextDifference(leftOriginal, rightOriginal, options);
-      const highlightedRight = highlightTextDifference(rightOriginal, leftOriginal, options);
-
-      leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
-      rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
+      // Determine if this is an addition, removal, or modification
+      if (!leftExists && rightExists) {
+        // Line exists only on right - it was added to right (removed from left perspective)
+        const escapedRight = escapeHtml(rightOriginal);
+        leftFullContent += `<div class="line-removed"><span class="line-number">${lineNum}</span>(empty line)</div>\n`;
+        rightFullContent += `<div class="line-added"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
+      } else if (leftExists && !rightExists) {
+        // Line exists only on left - it was REMOVED from right (added to left perspective)
+        const escapedLeft = escapeHtml(leftOriginal);
+        leftFullContent += `<div class="line-added"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
+        rightFullContent += `<div class="line-removed"><span class="line-number">${lineNum}</span>(empty line)</div>\n`;
+      } else {
+        // Line was modified (exists on both sides but different)
+        const highlightedLeft = highlightTextDifference(leftOriginal, rightOriginal, options);
+        const highlightedRight = highlightTextDifference(rightOriginal, leftOriginal, options);
+        leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
+        rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
+      }
     } else {
       // Show unchanged lines with HTML-escaped content
       const escapedLeft = escapeHtml(leftOriginal);
@@ -1235,6 +1272,14 @@ function sortArrays(obj: unknown): unknown {
     const processed = obj.map(sortArrays);
     // Sort the array by stringified representation for comparison
     return processed.sort((a, b) => {
+      // Handle different types of values
+      if (typeof a === 'string' && typeof b === 'string') {
+        return a.localeCompare(b);
+      }
+      if (typeof a === 'number' && typeof b === 'number') {
+        return a - b;
+      }
+      // For objects and mixed types, use JSON string comparison
       const aStr = JSON.stringify(a);
       const bStr = JSON.stringify(b);
       return aStr.localeCompare(bStr);

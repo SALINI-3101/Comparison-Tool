@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   ResultsContainer,
   ResultsHeader,
@@ -14,9 +14,6 @@ import {
   SuccessMessage,
   StatisticsRow,
   StatisticBadge,
-  FilterRow,
-  FilterLabel,
-  FilterPill,
 } from './ResultsPanel.styles';
 import { ValidationResult, ComparisonResult } from '@/utils/comparison';
 
@@ -54,19 +51,6 @@ const InfoIcon = () => (
 );
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, comparisonResult }) => {
-  const [activeFilters, setActiveFilters] = useState<Set<'added' | 'removed' | 'modified'>>(
-    new Set(['added', 'removed', 'modified'])
-  );
-
-  const toggleFilter = (filter: 'added' | 'removed' | 'modified') => {
-    const newFilters = new Set(activeFilters);
-    if (newFilters.has(filter)) {
-      newFilters.delete(filter);
-    } else {
-      newFilters.add(filter);
-    }
-    setActiveFilters(newFilters);
-  };
 
   if (validationResult) {
     const status = validationResult.isValid ? 'success' : 'error';
@@ -109,49 +93,23 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, co
           {comparisonResult.areEqual ? 'Both contents are identical' : comparisonResult.message}
         </ResultsHeader>
         {hasStatistics && (
-          <>
-            <StatisticsRow>
-              {statistics.added > 0 && (
-                <StatisticBadge $type="added">
-                  Added: {statistics.added}
-                </StatisticBadge>
-              )}
-              {statistics.removed > 0 && (
-                <StatisticBadge $type="removed">
-                  Removed: {statistics.removed}
-                </StatisticBadge>
-              )}
-              {statistics.modified > 0 && (
-                <StatisticBadge $type="modified">
-                  Modified: {statistics.modified}
-                </StatisticBadge>
-              )}
-            </StatisticsRow>
-            <FilterRow>
-              <FilterLabel>Filter:</FilterLabel>
-              <FilterPill
-                $type="added"
-                $active={activeFilters.has('added')}
-                onClick={() => toggleFilter('added')}
-              >
-                Added
-              </FilterPill>
-              <FilterPill
-                $type="removed"
-                $active={activeFilters.has('removed')}
-                onClick={() => toggleFilter('removed')}
-              >
-                Removed
-              </FilterPill>
-              <FilterPill
-                $type="modified"
-                $active={activeFilters.has('modified')}
-                onClick={() => toggleFilter('modified')}
-              >
-                Modified
-              </FilterPill>
-            </FilterRow>
-          </>
+          <StatisticsRow>
+            {statistics.added > 0 && (
+              <StatisticBadge $type="added">
+                Added: {statistics.added}
+              </StatisticBadge>
+            )}
+            {statistics.removed > 0 && (
+              <StatisticBadge $type="removed">
+                Removed: {statistics.removed}
+              </StatisticBadge>
+            )}
+            {statistics.modified > 0 && (
+              <StatisticBadge $type="modified">
+                Modified: {statistics.modified}
+              </StatisticBadge>
+            )}
+          </StatisticsRow>
         )}
         <ResultsBody>
           {comparisonResult.areEqual ? null : (
@@ -178,6 +136,10 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, co
                 const leftHasHTML = hasHTMLMarkers(diff.leftValue);
                 const rightHasHTML = hasHTMLMarkers(diff.rightValue);
 
+                // Determine the color for each side based on the difference type
+                const leftDiffType = diff.type === 'added' ? undefined : diff.type;
+                const rightDiffType = diff.type === 'removed' ? undefined : diff.type === 'added' ? 'added' : diff.type;
+
                 return (
                   <DifferenceItem key={index} $diffType={diff.type}>
                     <DifferencePath>
@@ -185,20 +147,20 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, co
                       <DifferenceTypeBadge $type={diff.type}>{diff.type}</DifferenceTypeBadge>
                     </DifferencePath>
                     <DifferenceValues>
-                      <DifferenceValue $type="left">
-                        <ValueLabel>Left</ValueLabel>
+                      <DifferenceValue $type="left" $diffType={leftDiffType}>
+                        <ValueLabel>Base Version</ValueLabel>
                         {leftHasHTML ? (
-                          <ValueContent dangerouslySetInnerHTML={{ __html: leftValue }} />
+                          <ValueContent $diffType={leftDiffType} dangerouslySetInnerHTML={{ __html: leftValue }} />
                         ) : (
-                          <ValueContent>{leftValue}</ValueContent>
+                          <ValueContent $diffType={leftDiffType}>{leftValue}</ValueContent>
                         )}
                       </DifferenceValue>
-                      <DifferenceValue $type="right">
-                        <ValueLabel>Right</ValueLabel>
+                      <DifferenceValue $type="right" $diffType={rightDiffType}>
+                        <ValueLabel>Modified Version</ValueLabel>
                         {rightHasHTML ? (
-                          <ValueContent dangerouslySetInnerHTML={{ __html: rightValue }} />
+                          <ValueContent $diffType={rightDiffType} dangerouslySetInnerHTML={{ __html: rightValue }} />
                         ) : (
-                          <ValueContent>{rightValue}</ValueContent>
+                          <ValueContent $diffType={rightDiffType}>{rightValue}</ValueContent>
                         )}
                       </DifferenceValue>
                     </DifferenceValues>

@@ -91,11 +91,16 @@ export const DifferenceValues = styled.div`
   }
 `;
 
-export const DifferenceValue = styled.div<{ $type: 'left' | 'right' }>`
+export const DifferenceValue = styled.div<{ $type: 'left' | 'right'; $diffType?: 'added' | 'removed' | 'modified' }>`
   padding: 4px;
   background: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(255, 255, 255, 0.08)' : theme.colors.cardBackground};
   border-radius: 6px;
-  border: 2px solid ${({ $type, theme }) => ($type === 'left' ? theme.colors.purple : theme.colors.blue)};
+  border: 2px solid ${({ $type, theme, $diffType }) => {
+    if ($diffType === 'added') return '#10b981';
+    if ($diffType === 'removed') return '#ef4444';
+    if ($diffType === 'modified') return '#f97316';
+    return $type === 'left' ? theme.colors.purple : theme.colors.blue;
+  }};
   transition: all 0.3s ease;
 `;
 
@@ -109,9 +114,9 @@ export const ValueLabel = styled.div`
   transition: color 0.3s ease;
 `;
 
-export const ValueContent = styled.pre`
+export const ValueContent = styled.pre<{ $diffType?: 'added' | 'removed' | 'modified' }>`
   margin: 0;
-  padding: 0;
+  padding: 8px;
   font-size: 13px;
   font-family: 'Segoe UI', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Consolas', 'Monaco', 'Courier New', monospace;
   color: ${({ theme }) => theme.colors.text};
@@ -123,6 +128,8 @@ export const ValueContent = styled.pre`
   overflow-x: auto;
 
   .line-diff,
+  .line-added,
+  .line-removed,
   .line-same {
     display: flex;
     align-items: baseline;
@@ -132,8 +139,21 @@ export const ValueContent = styled.pre`
     line-height: 1.6;
   }
 
+  .line-added {
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(16, 185, 129, 0.3)' : '#a7f3d0'};
+  }
+
+  .line-removed {
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(239, 68, 68, 0.3)' : '#fecaca'};
+  }
+
   .line-diff {
-    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(251, 191, 36, 0.15)' : '#fef3c7'};
+    background-color: ${({ theme, $diffType }) => {
+      if ($diffType === 'added') return theme.colors.background === '#111827' ? 'rgba(16, 185, 129, 0.3)' : '#a7f3d0';
+      if ($diffType === 'removed') return theme.colors.background === '#111827' ? 'rgba(239, 68, 68, 0.3)' : '#fecaca';
+      if ($diffType === 'modified') return theme.colors.background === '#111827' ? 'rgba(251, 191, 36, 0.3)' : '#fde68a';
+      return 'transparent';
+    }};
   }
 
   .line-same {

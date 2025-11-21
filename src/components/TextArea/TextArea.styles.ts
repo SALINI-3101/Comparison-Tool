@@ -22,7 +22,6 @@ export const EditorWrapper = styled.div`
   border: 2px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radii.md};
   overflow: hidden;
-  transition: all 0.3s ease;
   background: ${({ theme }) => theme.colors.gray[50]};
   max-height: 500px;
   height: 500px;
@@ -55,7 +54,6 @@ export const LineNumbers = styled.div`
   overflow-y: auto;
   border-right: 2px solid ${({ theme }) => theme.colors.border};
   min-width: 50px;
-  transition: all 0.3s ease;
 
   div {
     min-height: 22.4px;
@@ -86,7 +84,6 @@ export const StyledTextArea = styled.textarea`
   border: none;
   resize: none;
   overflow-y: auto;
-  transition: all 0.3s ease;
 
   &::placeholder {
     color: ${({ theme }) => theme.colors.subtleText};

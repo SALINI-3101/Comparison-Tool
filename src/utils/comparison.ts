@@ -213,98 +213,68 @@ function compareJSONLines(
   rightLines: string[],
   options: ComparisonOptions
 ): { differences: Difference[]; diffCount: number; statistics: { added: number; removed: number; modified: number } } {
-  const maxLines = Math.max(leftLines.length, rightLines.length);
+  // Use LCS-based diff algorithm
+  const diffOps = computeDiff(leftLines, rightLines, options);
 
-  // First pass: identify which lines are different
-  const diffLineNumbers: number[] = [];
+  // Count statistics
   let addedCount = 0;
   let removedCount = 0;
   let modifiedCount = 0;
+  let diffCount = 0;
 
-  for (let i = 0; i < maxLines; i++) {
-    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
-
-    // Apply options for comparison
-    let leftCompare = leftLine;
-    let rightCompare = rightLine;
-
-    if (options.ignoreWhitespace) {
-      // Remove ALL whitespace characters for comparison
-      leftCompare = leftCompare.replace(/\s/g, '');
-      rightCompare = rightCompare.replace(/\s/g, '');
+  diffOps.forEach(op => {
+    if (op.type === 'add') {
+      addedCount++;
+      diffCount++;
+    } else if (op.type === 'remove') {
+      removedCount++;
+      diffCount++;
+    } else if (op.type === 'modify') {
+      modifiedCount++;
+      diffCount++;
     }
+  });
 
-    if (!options.caseSensitive) {
-      leftCompare = leftCompare.toLowerCase();
-      rightCompare = rightCompare.toLowerCase();
-    }
-
-    if (leftCompare !== rightCompare) {
-      diffLineNumbers.push(i);
-
-      // Categorize the difference
-      if (!leftLine && rightLine) {
-        addedCount++;
-      } else if (leftLine && !rightLine) {
-        removedCount++;
-      } else {
-        modifiedCount++;
-      }
-    }
-  }
-
-  const diffCount = diffLineNumbers.length;
   const statistics = { added: addedCount, removed: removedCount, modified: modifiedCount };
 
   if (diffCount === 0) {
     return { differences: [], diffCount: 0, statistics: { added: 0, removed: 0, modified: 0 } };
   }
 
-  // Show ALL lines, not just differences with context
-  const finalLinesToDisplay = Array.from({ length: maxLines }, (_, i) => i);
-
-  // Build content with ALL lines
+  // Build HTML content - show ALL lines for JSON (not context-based)
   let leftFullContent = '';
   let rightFullContent = '';
+  let leftLineNum = 1;
+  let rightLineNum = 1;
 
-  finalLinesToDisplay.forEach((i) => {
-    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
-    const leftOriginal = leftLine;
-    const rightOriginal = rightLine;
-
-    // Apply options for comparison
-    let leftCompare = leftLine;
-    let rightCompare = rightLine;
-
-    if (options.ignoreWhitespace) {
-      // Remove ALL whitespace characters for comparison
-      leftCompare = leftCompare.replace(/\s/g, '');
-      rightCompare = rightCompare.replace(/\s/g, '');
-    }
-
-    if (!options.caseSensitive) {
-      leftCompare = leftCompare.toLowerCase();
-      rightCompare = rightCompare.toLowerCase();
-    }
-
-    const lineNum = i + 1;
-
-    // Check if lines are different
-    if (leftCompare !== rightCompare) {
-      // Highlight the differences within the line
-      const highlightedLeft = highlightJSONDifference(leftOriginal, rightOriginal, options);
-      const highlightedRight = highlightJSONDifference(rightOriginal, leftOriginal, options);
-
-      leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
-      rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
-    } else {
-      // Show unchanged lines with HTML-escaped content
-      const escapedLeft = escapeHtml(leftOriginal);
-      const escapedRight = escapeHtml(rightOriginal);
-      leftFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
-      rightFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
+  diffOps.forEach((op) => {
+    if (op.type === 'keep') {
+      // Same line on both sides
+      const escapedLine = escapeHtml(op.line);
+      leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      leftLineNum++;
+      rightLineNum++;
+    } else if (op.type === 'modify') {
+      // Line modified (exists on both sides but different) - Show in YELLOW with highlighting
+      const highlightedLeft = highlightJSONDifference(op.line, op.rightLine || '', { caseSensitive: true, ignoreWhitespace: false });
+      const highlightedRight = highlightJSONDifference(op.rightLine || '', op.line, { caseSensitive: true, ignoreWhitespace: false });
+      leftFullContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>\n`;
+      rightFullContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>\n`;
+      leftLineNum++;
+      rightLineNum++;
+    } else if (op.type === 'remove') {
+      // Line removed from left (exists in left, not in right) - Show in RED on left only
+      const escapedLine = escapeHtml(op.line);
+      leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
+      // Don't add anything to right side for removed lines
+      leftLineNum++;
+    } else if (op.type === 'add') {
+      // Line added to right (exists in right, not in left) - Show in GREEN on right only
+      const escapedLine = escapeHtml(op.line);
+      // Don't add anything to left side for added lines
+      rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      rightLineNum++;
     }
   });
 
@@ -521,7 +491,226 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Helper function to compare XML line by line with highlighting
+ * Compute LCS (Longest Common Subsequence) based diff using Myers algorithm
+ * Returns an array of diff operations
+ */
+interface DiffOp {
+  type: 'keep' | 'add' | 'remove' | 'modify';
+  leftIndex?: number;
+  rightIndex?: number;
+  line: string;
+  rightLine?: string; // For modify type
+}
+
+function computeDiff(leftLines: string[], rightLines: string[], options: ComparisonOptions): DiffOp[] {
+  // Normalize lines for comparison based on options
+  const normalizeForComparison = (line: string): string => {
+    let normalized = line;
+    if (options.ignoreWhitespace) {
+      normalized = normalized.replace(/\s/g, '');
+    }
+    if (!options.caseSensitive) {
+      normalized = normalized.toLowerCase();
+    }
+    return normalized;
+  };
+
+  const leftNormalized = leftLines.map(normalizeForComparison);
+  const rightNormalized = rightLines.map(normalizeForComparison);
+
+  // Build LCS table using dynamic programming
+  const m = leftLines.length;
+  const n = rightLines.length;
+  const lcs: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (leftNormalized[i - 1] === rightNormalized[j - 1]) {
+        lcs[i][j] = lcs[i - 1][j - 1] + 1;
+      } else {
+        lcs[i][j] = Math.max(lcs[i - 1][j], lcs[i][j - 1]);
+      }
+    }
+  }
+
+  // Backtrack to build diff operations
+  const result: DiffOp[] = [];
+  let i = m;
+  let j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && leftNormalized[i - 1] === rightNormalized[j - 1]) {
+      // Lines are the same - keep
+      result.unshift({
+        type: 'keep',
+        leftIndex: i - 1,
+        rightIndex: j - 1,
+        line: leftLines[i - 1]
+      });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || lcs[i][j - 1] >= lcs[i - 1][j])) {
+      // Line added on right
+      result.unshift({
+        type: 'add',
+        rightIndex: j - 1,
+        line: rightLines[j - 1]
+      });
+      j--;
+    } else if (i > 0) {
+      // Line removed from left
+      result.unshift({
+        type: 'remove',
+        leftIndex: i - 1,
+        line: leftLines[i - 1]
+      });
+      i--;
+    }
+  }
+
+  // Post-process: Detect modifications using optimal matching
+  const processed: DiffOp[] = [];
+  let idx = 0;
+
+  while (idx < result.length) {
+    const current = result[idx];
+
+    // If not a remove, just add it
+    if (current.type !== 'remove') {
+      processed.push(current);
+      idx++;
+      continue;
+    }
+
+    // Collect consecutive removes
+    const removes: DiffOp[] = [];
+    while (idx < result.length && result[idx].type === 'remove') {
+      removes.push(result[idx]);
+      idx++;
+    }
+
+    // Collect consecutive adds
+    const adds: DiffOp[] = [];
+    while (idx < result.length && result[idx].type === 'add') {
+      adds.push(result[idx]);
+      idx++;
+    }
+
+    // Try to match removes with adds based on similarity
+    if (removes.length > 0 && adds.length > 0) {
+      const usedAdds = new Set<number>();
+      const usedRemoves = new Set<number>();
+
+      // For each remove, find best matching add
+      for (let r = 0; r < removes.length; r++) {
+        if (usedRemoves.has(r)) continue;
+
+        const removeOp = removes[r];
+        const leftLine = leftLines[removeOp.leftIndex!];
+
+        let bestMatch = -1;
+        let bestSimilarity = 0.4; // Minimum threshold
+
+        for (let a = 0; a < adds.length; a++) {
+          if (usedAdds.has(a)) continue;
+
+          const addOp = adds[a];
+          const rightLine = rightLines[addOp.rightIndex!];
+          const similarity = calculateSimilarity(leftLine, rightLine);
+
+          if (similarity > bestSimilarity) {
+            bestSimilarity = similarity;
+            bestMatch = a;
+          }
+        }
+
+        if (bestMatch >= 0) {
+          // Found match - treat as modification
+          const addOp = adds[bestMatch];
+          const rightLine = rightLines[addOp.rightIndex!];
+
+          // Matched successfully - similarity above threshold
+
+          processed.push({
+            type: 'modify',
+            leftIndex: removeOp.leftIndex,
+            rightIndex: addOp.rightIndex,
+            line: leftLine,
+            rightLine: rightLine
+          });
+
+          usedRemoves.add(r);
+          usedAdds.add(bestMatch);
+        }
+      }
+
+      // Add unmatched removes
+      for (let r = 0; r < removes.length; r++) {
+        if (!usedRemoves.has(r)) {
+          processed.push(removes[r]);
+        }
+      }
+
+      // Add unmatched adds
+      for (let a = 0; a < adds.length; a++) {
+        if (!usedAdds.has(a)) {
+          processed.push(adds[a]);
+        }
+      }
+    } else {
+      // No matching possible
+      processed.push(...removes);
+      processed.push(...adds);
+    }
+  }
+
+  return processed;
+}
+
+/**
+ * Calculate similarity between two strings (0 = completely different, 1 = identical)
+ * Uses Levenshtein distance ratio for better detection of modifications
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  if (!str1 || !str2) return 0;
+  if (str1 === str2) return 1;
+
+  const maxLength = Math.max(str1.length, str2.length);
+  if (maxLength === 0) return 1.0;
+
+  // Calculate Levenshtein distance
+  const matrix: number[][] = [];
+
+  for (let i = 0; i <= str1.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= str2.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= str1.length; i++) {
+    for (let j = 1; j <= str2.length; j++) {
+      if (str1[i - 1] === str2[j - 1]) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+
+  const levenshteinDistance = matrix[str1.length][str2.length];
+
+  // Return similarity ratio (1 - normalized distance)
+  return 1 - (levenshteinDistance / maxLength);
+}
+
+/**
+ * Helper function to compare XML line by line with highlighting using LCS-based diff
  * Returns all lines with differences highlighted
  * Optimized for large files by showing only context around differences
  */
@@ -530,81 +719,65 @@ function compareXMLLines(
   rightLines: string[],
   options: ComparisonOptions
 ): { differences: Difference[]; diffCount: number; statistics: { added: number; removed: number; modified: number } } {
-  const maxLines = Math.max(leftLines.length, rightLines.length);
+  // Use LCS-based diff algorithm
+  const diffOps = computeDiff(leftLines, rightLines, options);
 
-  // Adjust context based on file size
-  const LARGE_FILE_THRESHOLD = 1000; // Consider files with >1000 lines as large
-  const isLargeFile = maxLines > LARGE_FILE_THRESHOLD;
-
-  const CONTEXT_LINES = isLargeFile ? 2 : 3; // Show 2 lines for large files, 3 for small
-
-  // First pass: identify which lines are different
-  const diffLineNumbers: number[] = [];
+  // Count statistics
   let addedCount = 0;
   let removedCount = 0;
   let modifiedCount = 0;
+  let diffCount = 0;
 
-  for (let i = 0; i < maxLines; i++) {
-    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
-
-    // Apply options for comparison
-    let leftCompare = leftLine;
-    let rightCompare = rightLine;
-
-    if (options.ignoreWhitespace) {
-      // Remove ALL whitespace characters for comparison
-      leftCompare = leftCompare.replace(/\s/g, '');
-      rightCompare = rightCompare.replace(/\s/g, '');
+  diffOps.forEach(op => {
+    if (op.type === 'add') {
+      addedCount++;
+      diffCount++;
+    } else if (op.type === 'remove') {
+      removedCount++;
+      diffCount++;
+    } else if (op.type === 'modify') {
+      modifiedCount++;
+      diffCount++;
     }
+  });
 
-    if (!options.caseSensitive) {
-      leftCompare = leftCompare.toLowerCase();
-      rightCompare = rightCompare.toLowerCase();
-    }
-
-    if (leftCompare !== rightCompare) {
-      diffLineNumbers.push(i);
-
-      // Categorize the difference
-      if (!leftLine && rightLine) {
-        addedCount++;
-      } else if (leftLine && !rightLine) {
-        removedCount++;
-      } else {
-        modifiedCount++;
-      }
-    }
-  }
-
-  const diffCount = diffLineNumbers.length;
   const statistics = { added: addedCount, removed: removedCount, modified: modifiedCount };
 
   if (diffCount === 0) {
     return { differences: [], diffCount: 0, statistics: { added: 0, removed: 0, modified: 0 } };
   }
 
-  // Build set of line numbers to display (differences + context)
-  const linesToDisplay = new Set<number>();
+  // Build HTML content
+  let leftFullContent = '';
+  let rightFullContent = '';
+  let leftLineNum = 1;
+  let rightLineNum = 1;
 
-  // For very large diff counts, limit the display to prevent browser freeze
+  // For very large diff counts, limit the display
   const MAX_DIFFS_TO_DISPLAY = 1000;
-  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
-    ? diffLineNumbers.slice(0, MAX_DIFFS_TO_DISPLAY)
-    : diffLineNumbers;
+  const CONTEXT_LINES = 3;
 
-  diffsToProcess.forEach(lineNum => {
-    for (let j = Math.max(0, lineNum - CONTEXT_LINES); j <= Math.min(maxLines - 1, lineNum + CONTEXT_LINES); j++) {
-      linesToDisplay.add(j);
+  // Find indices of diff operations (not 'keep')
+  const diffIndices: number[] = [];
+  diffOps.forEach((op, idx) => {
+    if (op.type !== 'keep') {
+      diffIndices.push(idx);
     }
   });
 
-  const finalLinesToDisplay = Array.from(linesToDisplay).sort((a, b) => a - b);
+  // Build set of operations to display (diffs + context)
+  const opsToDisplay = new Set<number>();
+  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
+    ? diffIndices.slice(0, MAX_DIFFS_TO_DISPLAY)
+    : diffIndices;
 
-  // Build content with only selected lines
-  let leftFullContent = '';
-  let rightFullContent = '';
-  let lastDisplayedLine = -1;
+  diffsToProcess.forEach(idx => {
+    for (let j = Math.max(0, idx - CONTEXT_LINES); j <= Math.min(diffOps.length - 1, idx + CONTEXT_LINES); j++) {
+      opsToDisplay.add(j);
+    }
+  });
+
+  const finalOpsToDisplay = Array.from(opsToDisplay).sort((a, b) => a - b);
 
   // Add warning message if showing limited results
   if (diffCount > MAX_DIFFS_TO_DISPLAY) {
@@ -613,52 +786,47 @@ function compareXMLLines(
     rightFullContent += infoMsg;
   }
 
-  finalLinesToDisplay.forEach((i) => {
+  let lastDisplayedIdx = -1;
+
+  finalOpsToDisplay.forEach((idx) => {
+    const op = diffOps[idx];
+
     // Add ellipsis if there's a gap
-    if (lastDisplayedLine >= 0 && i > lastDisplayedLine + 1) {
+    if (lastDisplayedIdx >= 0 && idx > lastDisplayedIdx + 1) {
       leftFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
       rightFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
     }
 
-    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
-    const leftOriginal = leftLine;
-    const rightOriginal = rightLine;
-
-    // Apply options for comparison
-    let leftCompare = leftLine;
-    let rightCompare = rightLine;
-
-    if (options.ignoreWhitespace) {
-      // Remove ALL whitespace characters for comparison
-      leftCompare = leftCompare.replace(/\s/g, '');
-      rightCompare = rightCompare.replace(/\s/g, '');
+    if (op.type === 'keep') {
+      // Same line on both sides
+      const escapedLine = escapeHtml(op.line);
+      leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      leftLineNum++;
+      rightLineNum++;
+    } else if (op.type === 'modify') {
+      // Line modified (exists on both sides but different)
+      const highlightedLeft = highlightXMLDifference(op.line, op.rightLine || '', { caseSensitive: true, ignoreWhitespace: false });
+      const highlightedRight = highlightXMLDifference(op.rightLine || '', op.line, { caseSensitive: true, ignoreWhitespace: false });
+      leftFullContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>\n`;
+      rightFullContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>\n`;
+      leftLineNum++;
+      rightLineNum++;
+    } else if (op.type === 'remove') {
+      // Line removed from left (exists in left, not in right)
+      const escapedLine = escapeHtml(op.line);
+      leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
+      // Don't add anything to right side for removed lines
+      leftLineNum++;
+    } else if (op.type === 'add') {
+      // Line added to right (exists in right, not in left)
+      const escapedLine = escapeHtml(op.line);
+      // Don't add anything to left side for added lines
+      rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      rightLineNum++;
     }
 
-    if (!options.caseSensitive) {
-      leftCompare = leftCompare.toLowerCase();
-      rightCompare = rightCompare.toLowerCase();
-    }
-
-    const lineNum = i + 1;
-
-    // Check if lines are different
-    if (leftCompare !== rightCompare) {
-      // Highlight the differences within the line
-      const highlightedLeft = highlightXMLDifference(leftOriginal, rightOriginal, options);
-      const highlightedRight = highlightXMLDifference(rightOriginal, leftOriginal, options);
-
-      leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
-      rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
-    } else {
-      // Show unchanged lines with HTML-escaped content
-      const escapedLeft = escapeHtml(leftOriginal);
-      const escapedRight = escapeHtml(rightOriginal);
-      leftFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
-      rightFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
-    }
-
-    lastDisplayedLine = i;
+    lastDisplayedIdx = idx;
   });
 
   // Return a single difference containing the content
@@ -999,83 +1167,65 @@ function compareTextLines(
   rightLines: string[],
   options: ComparisonOptions
 ): { differences: Difference[]; diffCount: number; statistics: { added: number; removed: number; modified: number } } {
-  const maxLines = Math.max(leftLines.length, rightLines.length);
+  // Use LCS-based diff algorithm
+  const diffOps = computeDiff(leftLines, rightLines, options);
 
-  // Adjust context based on file size
-  const LARGE_FILE_THRESHOLD = 1000;
-  const isLargeFile = maxLines > LARGE_FILE_THRESHOLD;
-  const CONTEXT_LINES = isLargeFile ? 2 : 3;
-
-  // First pass: identify which lines are different
-  const diffLineNumbers: number[] = [];
+  // Count statistics
   let addedCount = 0;
   let removedCount = 0;
   let modifiedCount = 0;
+  let diffCount = 0;
 
-  for (let i = 0; i < maxLines; i++) {
-    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
-
-    // Apply options for comparison
-    let leftCompare = leftLine;
-    let rightCompare = rightLine;
-
-    if (options.ignoreWhitespace) {
-      // Remove ALL whitespace characters for comparison
-      leftCompare = leftCompare.replace(/\s/g, '');
-      rightCompare = rightCompare.replace(/\s/g, '');
+  diffOps.forEach(op => {
+    if (op.type === 'add') {
+      addedCount++;
+      diffCount++;
+    } else if (op.type === 'remove') {
+      removedCount++;
+      diffCount++;
+    } else if (op.type === 'modify') {
+      modifiedCount++;
+      diffCount++;
     }
+  });
 
-    if (!options.caseSensitive) {
-      leftCompare = leftCompare.toLowerCase();
-      rightCompare = rightCompare.toLowerCase();
-    }
-
-    if (leftCompare !== rightCompare) {
-      diffLineNumbers.push(i);
-
-      // Categorize the difference
-      // Count both added and removed to reflect both perspectives
-      if (!leftLine && rightLine) {
-        addedCount++; // Added to right (green on right)
-        removedCount++; // Missing from left (red on left)
-      } else if (leftLine && !rightLine) {
-        removedCount++; // Removed from right (red on right)
-        addedCount++; // Present on left (green on left)
-      } else {
-        modifiedCount++;
-      }
-    }
-  }
-
-  const diffCount = diffLineNumbers.length;
   const statistics = { added: addedCount, removed: removedCount, modified: modifiedCount };
 
   if (diffCount === 0) {
     return { differences: [], diffCount: 0, statistics: { added: 0, removed: 0, modified: 0 } };
   }
 
-  // Build set of line numbers to display (differences + context)
-  const linesToDisplay = new Set<number>();
+  // Build HTML content
+  let leftFullContent = '';
+  let rightFullContent = '';
+  let leftLineNum = 1;
+  let rightLineNum = 1;
 
   // For very large diff counts, limit the display
   const MAX_DIFFS_TO_DISPLAY = 1000;
-  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
-    ? diffLineNumbers.slice(0, MAX_DIFFS_TO_DISPLAY)
-    : diffLineNumbers;
+  const CONTEXT_LINES = 3;
 
-  diffsToProcess.forEach(lineNum => {
-    for (let j = Math.max(0, lineNum - CONTEXT_LINES); j <= Math.min(maxLines - 1, lineNum + CONTEXT_LINES); j++) {
-      linesToDisplay.add(j);
+  // Find indices of diff operations (not 'keep')
+  const diffIndices: number[] = [];
+  diffOps.forEach((op, idx) => {
+    if (op.type !== 'keep') {
+      diffIndices.push(idx);
     }
   });
 
-  const finalLinesToDisplay = Array.from(linesToDisplay).sort((a, b) => a - b);
+  // Build set of operations to display (diffs + context)
+  const opsToDisplay = new Set<number>();
+  const diffsToProcess = diffCount > MAX_DIFFS_TO_DISPLAY
+    ? diffIndices.slice(0, MAX_DIFFS_TO_DISPLAY)
+    : diffIndices;
 
-  // Build content with only selected lines
-  let leftFullContent = '';
-  let rightFullContent = '';
-  let lastDisplayedLine = -1;
+  diffsToProcess.forEach(idx => {
+    for (let j = Math.max(0, idx - CONTEXT_LINES); j <= Math.min(diffOps.length - 1, idx + CONTEXT_LINES); j++) {
+      opsToDisplay.add(j);
+    }
+  });
+
+  const finalOpsToDisplay = Array.from(opsToDisplay).sort((a, b) => a - b);
 
   // Add warning message if showing limited results
   if (diffCount > MAX_DIFFS_TO_DISPLAY) {
@@ -1084,68 +1234,47 @@ function compareTextLines(
     rightFullContent += infoMsg;
   }
 
-  finalLinesToDisplay.forEach((i) => {
+  let lastDisplayedIdx = -1;
+
+  finalOpsToDisplay.forEach((idx) => {
+    const op = diffOps[idx];
+
     // Add ellipsis if there's a gap
-    if (lastDisplayedLine >= 0 && i > lastDisplayedLine + 1) {
+    if (lastDisplayedIdx >= 0 && idx > lastDisplayedIdx + 1) {
       leftFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
       rightFullContent += `<div class="line-same" style="text-align: center; font-style: italic; color: #888;">...</div>\n`;
     }
 
-    const leftLine = leftLines[i] !== undefined ? leftLines[i] : '';
-    const rightLine = rightLines[i] !== undefined ? rightLines[i] : '';
-    const leftOriginal = leftLine;
-    const rightOriginal = rightLine;
-
-    // Apply options for comparison
-    let leftCompare = leftLine;
-    let rightCompare = rightLine;
-
-    if (options.ignoreWhitespace) {
-      // Remove ALL whitespace characters for comparison
-      leftCompare = leftCompare.replace(/\s/g, '');
-      rightCompare = rightCompare.replace(/\s/g, '');
+    if (op.type === 'keep') {
+      // Same line on both sides
+      const escapedLine = escapeHtml(op.line);
+      leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      leftLineNum++;
+      rightLineNum++;
+    } else if (op.type === 'modify') {
+      // Line modified (exists on both sides but different)
+      const highlightedLeft = highlightXMLDifference(op.line, op.rightLine || '', { caseSensitive: true, ignoreWhitespace: false });
+      const highlightedRight = highlightXMLDifference(op.rightLine || '', op.line, { caseSensitive: true, ignoreWhitespace: false });
+      leftFullContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>\n`;
+      rightFullContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>\n`;
+      leftLineNum++;
+      rightLineNum++;
+    } else if (op.type === 'remove') {
+      // Line removed from left (exists in left, not in right)
+      const escapedLine = escapeHtml(op.line);
+      leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
+      // Don't add anything to right side for removed lines
+      leftLineNum++;
+    } else if (op.type === 'add') {
+      // Line added to right (exists in right, not in left)
+      const escapedLine = escapeHtml(op.line);
+      // Don't add anything to left side for added lines
+      rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      rightLineNum++;
     }
 
-    if (!options.caseSensitive) {
-      leftCompare = leftCompare.toLowerCase();
-      rightCompare = rightCompare.toLowerCase();
-    }
-
-    const lineNum = i + 1;
-
-    // Check if line exists on both sides (treat empty strings as non-existent)
-    const leftExists = leftLines[i] !== undefined && leftLines[i] !== '';
-    const rightExists = rightLines[i] !== undefined && rightLines[i] !== '';
-
-    // Check if lines are different
-    if (leftCompare !== rightCompare) {
-      // Determine if this is an addition, removal, or modification
-      if (!leftExists && rightExists) {
-        // Line exists only on right - it was added to right (removed from left perspective)
-        const escapedRight = escapeHtml(rightOriginal);
-        leftFullContent += `<div class="line-removed"><span class="line-number">${lineNum}</span>(empty line)</div>\n`;
-        rightFullContent += `<div class="line-added"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
-      } else if (leftExists && !rightExists) {
-        // Line exists only on left - it was REMOVED from right (added to left perspective)
-        const escapedLeft = escapeHtml(leftOriginal);
-        leftFullContent += `<div class="line-added"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
-        rightFullContent += `<div class="line-removed"><span class="line-number">${lineNum}</span>(empty line)</div>\n`;
-      } else {
-        // Line was modified (exists on both sides but different)
-        const highlightedLeft = highlightTextDifference(leftOriginal, rightOriginal, options);
-        const highlightedRight = highlightTextDifference(rightOriginal, leftOriginal, options);
-        leftFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedLeft}</div>\n`;
-        rightFullContent += `<div class="line-diff"><span class="line-number">${lineNum}</span>${highlightedRight}</div>\n`;
-      }
-    } else {
-      // Show unchanged lines with HTML-escaped content
-      const escapedLeft = escapeHtml(leftOriginal);
-      const escapedRight = escapeHtml(rightOriginal);
-      leftFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedLeft}</div>\n`;
-      rightFullContent += `<div class="line-same"><span class="line-number">${lineNum}</span>${escapedRight}</div>\n`;
-    }
-
-    lastDisplayedLine = i;
+    lastDisplayedIdx = idx;
   });
 
   // Return a single difference containing the content
@@ -1164,6 +1293,7 @@ function compareTextLines(
 /**
  * Helper function to highlight differences within text lines
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function highlightTextDifference(line: string, compareLine: string, options: ComparisonOptions): string {
   if (!line && !compareLine) return '';
   if (!line) return escapeHtml('(empty line)');
@@ -1410,3 +1540,4 @@ export function downloadContent(content: string, filename: string, type: 'json' 
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+// trigger rebuild

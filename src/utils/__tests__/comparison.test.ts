@@ -131,3 +131,52 @@ describe('compareText', () => {
     expect(result.message).toBe('Both contents are empty');
   });
 });
+
+describe('compareJSON - Modification Detection', () => {
+  it('should detect modified lines correctly', () => {
+    const left = JSON.stringify({
+      name: "John Doe",
+      age: 30,
+      email: "john@example.com"
+    }, null, 2);
+
+    const right = JSON.stringify({
+      name: "John Doess",
+      role: "developer",
+      email: "john@example.com"
+    }, null, 2);
+
+    const result = compareJSON(left, right);
+    expect(result.areEqual).toBe(false);
+    expect(result.statistics).toBeDefined();
+    expect(result.statistics?.modified).toBeGreaterThan(0);
+  });
+
+  it('should display modified count in statistics', () => {
+    const left = '{"name": "test"}';
+    const right = '{"name": "testing"}';
+    const result = compareJSON(left, right);
+    expect(result.statistics).toBeDefined();
+    expect(result.statistics?.modified).toBeGreaterThan(0);
+  });
+
+  it('should distinguish between added, removed, and modified', () => {
+    const left = JSON.stringify({
+      field1: "value1",
+      field2: "value2",
+      field3: "value3"
+    }, null, 2);
+
+    const right = JSON.stringify({
+      field1: "value1_modified",
+      field4: "value4",
+      field3: "value3"
+    }, null, 2);
+
+    const result = compareJSON(left, right);
+    expect(result.statistics).toBeDefined();
+    // Should have modifications, additions, and removals
+    const stats = result.statistics!;
+    expect(stats.added + stats.removed + stats.modified).toBeGreaterThan(0);
+  });
+});

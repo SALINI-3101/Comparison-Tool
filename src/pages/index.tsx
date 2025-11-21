@@ -1,11 +1,13 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import { Tabs, TabItem } from '@/components/Tabs';
 import { TextArea } from '@/components/TextArea';
 import { Toggle } from '@/components/Toggle';
+
 import { ResultsPanel } from '@/components/ResultsPanel';
 import { FileUpload } from '@/components/FileUpload';
 import { LoadingOverlay } from '@/components/LoadingOverlay';
+
 import { RefreshIcon, PlayIcon, CompareIcon, SunIcon, MoonIcon, DownloadIcon, CopyIcon, ClipboardIcon } from '@/components/Icons';
 import { useToast } from '@/components/Toast';
 import {
@@ -44,14 +46,25 @@ export default function ComparisonTool() {
   const { themeMode, toggleTheme } = useContext(ThemeContext);
   const { showError, showSuccess } = useToast();
 
-  // Helper function to save to localStorage
+  // Helper function to save to localStorage (debounced)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const saveToLocalStorage = (key: string, value: string) => {
     if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      // Silently fail - localStorage might be disabled
+
+    // Clear any pending save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
+
+    // Schedule save after 300ms of no typing
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // Silently fail - localStorage might be disabled
+      }
+    }, 300);
   };
 
   // State for validate modes (separate for each type)
@@ -210,62 +223,74 @@ export default function ComparisonTool() {
   useEffect(() => {
     saveToLocalStorage('jsonValidateContent', jsonValidateContent);
     if (!jsonValidateContent) {
-      setValidationResult(undefined);
+      setValidationResult(prev => prev ? undefined : prev);
     }
   }, [jsonValidateContent]);
 
   useEffect(() => {
     saveToLocalStorage('xmlValidateContent', xmlValidateContent);
     if (!xmlValidateContent) {
-      setValidationResult(undefined);
+      setValidationResult(prev => prev ? undefined : prev);
     }
   }, [xmlValidateContent]);
 
   useEffect(() => {
-    saveToLocalStorage('jsonCompareLeft', jsonCompareLeft);
-    // Clear comparison result if either left or right is empty
-    if (!jsonCompareLeft || !jsonCompareRight) {
-      setJsonComparisonResult(undefined);
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('jsonCompareLeft', jsonCompareLeft);
+    }
+  }, [jsonCompareLeft, isInitialLoadComplete]);
+
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('jsonCompareRight', jsonCompareRight);
+    }
+  }, [jsonCompareRight, isInitialLoadComplete]);
+
+  // Auto-clear JSON Compare results when either side is empty
+  useEffect(() => {
+    if (!jsonCompareLeft.trim() || !jsonCompareRight.trim()) {
+      setValidationResult(prev => prev ? undefined : prev);
+      setJsonComparisonResult(prev => prev ? undefined : prev);
     }
   }, [jsonCompareLeft, jsonCompareRight]);
 
   useEffect(() => {
-    saveToLocalStorage('jsonCompareRight', jsonCompareRight);
-    // Clear comparison result if either left or right is empty
-    if (!jsonCompareLeft || !jsonCompareRight) {
-      setJsonComparisonResult(undefined);
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('xmlCompareLeft', xmlCompareLeft);
     }
-  }, [jsonCompareLeft, jsonCompareRight]);
+  }, [xmlCompareLeft, isInitialLoadComplete]);
 
   useEffect(() => {
-    saveToLocalStorage('xmlCompareLeft', xmlCompareLeft);
-    // Clear comparison result if either left or right is empty
-    if (!xmlCompareLeft || !xmlCompareRight) {
-      setXmlComparisonResult(undefined);
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('xmlCompareRight', xmlCompareRight);
     }
-  }, [xmlCompareLeft, xmlCompareRight]);
+  }, [xmlCompareRight, isInitialLoadComplete]);
 
+  // Auto-clear XML Compare results when either side is empty
   useEffect(() => {
-    saveToLocalStorage('xmlCompareRight', xmlCompareRight);
-    // Clear comparison result if either left or right is empty
-    if (!xmlCompareLeft || !xmlCompareRight) {
-      setXmlComparisonResult(undefined);
+    if (!xmlCompareLeft.trim() || !xmlCompareRight.trim()) {
+      setValidationResult(prev => prev ? undefined : prev);
+      setXmlComparisonResult(prev => prev ? undefined : prev);
     }
   }, [xmlCompareLeft, xmlCompareRight]);
 
   useEffect(() => {
-    saveToLocalStorage('textCompareLeft', textCompareLeft);
-    // Clear comparison result if either left or right is empty
-    if (!textCompareLeft || !textCompareRight) {
-      setTextComparisonResult(undefined);
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('textCompareLeft', textCompareLeft);
     }
-  }, [textCompareLeft, textCompareRight]);
+  }, [textCompareLeft, isInitialLoadComplete]);
 
   useEffect(() => {
-    saveToLocalStorage('textCompareRight', textCompareRight);
-    // Clear comparison result if either left or right is empty
-    if (!textCompareLeft || !textCompareRight) {
-      setTextComparisonResult(undefined);
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('textCompareRight', textCompareRight);
+    }
+  }, [textCompareRight, isInitialLoadComplete]);
+
+  // Auto-clear Text Compare results when either side is empty
+  useEffect(() => {
+    if (!textCompareLeft.trim() || !textCompareRight.trim()) {
+      setValidationResult(prev => prev ? undefined : prev);
+      setTextComparisonResult(prev => prev ? undefined : prev);
     }
   }, [textCompareLeft, textCompareRight]);
 
@@ -303,27 +328,6 @@ export default function ComparisonTool() {
       saveToLocalStorage('ignoreAttributeOrder', String(ignoreAttributeOrder));
     }
   }, [ignoreAttributeOrder, isInitialLoadComplete]);
-
-  // Clear JSON comparison result when both JSON compare fields become empty
-  useEffect(() => {
-    if (!jsonCompareLeft && !jsonCompareRight) {
-      setJsonComparisonResult(undefined);
-    }
-  }, [jsonCompareLeft, jsonCompareRight]);
-
-  // Clear XML comparison result when both XML compare fields become empty
-  useEffect(() => {
-    if (!xmlCompareLeft && !xmlCompareRight) {
-      setXmlComparisonResult(undefined);
-    }
-  }, [xmlCompareLeft, xmlCompareRight]);
-
-  // Clear text comparison result when both text compare fields become empty
-  useEffect(() => {
-    if (!textCompareLeft && !textCompareRight) {
-      setTextComparisonResult(undefined);
-    }
-  }, [textCompareLeft, textCompareRight]);
 
   const handleClearAll = () => {
     setJsonValidateContent('');
@@ -429,6 +433,56 @@ export default function ComparisonTool() {
   };
 
   const handleCompareJSON = () => {
+    // Clear any previous results first
+    setValidationResult(undefined);
+    setJsonComparisonResult(undefined);
+
+    // Check if both inputs are provided
+    if (!jsonCompareLeft.trim() || !jsonCompareRight.trim()) {
+      // Don't show error if content is being cleared, just return silently
+      return;
+    }
+
+    // Validate that both inputs are valid JSON objects or arrays (not plain strings/primitives)
+    const errors: string[] = [];
+
+    try {
+      const leftParsed = JSON.parse(jsonCompareLeft);
+      if (typeof leftParsed !== 'object' || leftParsed === null) {
+        errors.push('JSON must be an object or array, not a primitive value');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Invalid JSON syntax';
+      if (!errors.includes(errorMessage)) {
+        errors.push(errorMessage);
+      }
+    }
+
+    try {
+      const rightParsed = JSON.parse(jsonCompareRight);
+      if (typeof rightParsed !== 'object' || rightParsed === null) {
+        // Only add this error if it's not a duplicate
+        if (!errors.includes('JSON must be an object or array, not a primitive value')) {
+          errors.push('JSON must be an object or array, not a primitive value');
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Invalid JSON syntax';
+      if (!errors.includes(errorMessage)) {
+        errors.push(errorMessage);
+      }
+    }
+
+    // If there are validation errors, show them in the results panel
+    if (errors.length > 0) {
+      setValidationResult({
+        isValid: false,
+        message: 'Invalid JSON',
+        errors: errors,
+      });
+      return;
+    }
+
     // Warn about large content
     const totalSize = (new Blob([jsonCompareLeft]).size + new Blob([jsonCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -461,6 +515,9 @@ export default function ComparisonTool() {
   };
 
   const handleCompareXML = () => {
+    // Clear any previous validation results first
+    setValidationResult(undefined);
+
     // Warn about large content
     const totalSize = (new Blob([xmlCompareLeft]).size + new Blob([xmlCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -492,6 +549,9 @@ export default function ComparisonTool() {
   };
 
   const handleCompareText = () => {
+    // Clear any previous validation results first
+    setValidationResult(undefined);
+
     // Warn about large content
     const totalSize = (new Blob([textCompareLeft]).size + new Blob([textCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -789,6 +849,7 @@ export default function ComparisonTool() {
               </div>
             </DualEditorContainer>
           </InputSection>
+          {validationResult && <ResultsPanel validationResult={validationResult} />}
           {jsonComparisonResult && <ResultsPanel comparisonResult={jsonComparisonResult} />}
         </>
       ),
@@ -966,6 +1027,7 @@ export default function ComparisonTool() {
               </div>
             </DualEditorContainer>
           </InputSection>
+          {validationResult && <ResultsPanel validationResult={validationResult} />}
           {xmlComparisonResult && <ResultsPanel comparisonResult={xmlComparisonResult} />}
         </>
       ),
@@ -1078,6 +1140,7 @@ export default function ComparisonTool() {
               </div>
             </DualEditorContainer>
           </InputSection>
+          {validationResult && <ResultsPanel validationResult={validationResult} />}
           {textComparisonResult && <ResultsPanel comparisonResult={textComparisonResult} />}
         </>
       ),

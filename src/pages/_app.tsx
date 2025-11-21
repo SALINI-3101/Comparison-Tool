@@ -60,9 +60,40 @@ function App({ Component, pageProps }: AppProps) {
     document.documentElement.setAttribute('data-theme', newTheme);
   };
 
-  // Don't render until we know the theme
+  // Show a minimal loading state while determining theme
   if (!themeMode) {
-    return null;
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#ffffff',
+        color: '#374151',
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '16px'
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: '4px solid #e5e7eb',
+            borderTopColor: '#8B5CF6',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite'
+          }} />
+          <style>{`
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      </div>
+    );
   }
 
   const currentTheme = themeMode === 'light' ? lightTheme : darkTheme;

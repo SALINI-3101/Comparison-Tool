@@ -147,6 +147,10 @@ export const ValueContent = styled.pre<{ $diffType?: 'added' | 'removed' | 'modi
     background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(239, 68, 68, 0.3)' : '#fecaca'};
   }
 
+  .line-modified {
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(251, 191, 36, 0.3)' : '#fde68a'};
+  }
+
   .line-diff {
     background-color: ${({ theme, $diffType }) => {
       if ($diffType === 'added') return theme.colors.background === '#111827' ? 'rgba(16, 185, 129, 0.3)' : '#a7f3d0';

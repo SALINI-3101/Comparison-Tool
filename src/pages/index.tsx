@@ -48,9 +48,16 @@ export default function ComparisonTool() {
 
   // Helper function to save to localStorage (debounced)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const skipNextSaveRef = useRef<Set<string>>(new Set());
 
   const saveToLocalStorage = (key: string, value: string) => {
     if (typeof window === 'undefined') return;
+
+    // Skip save if this key is in the skip list (during reset)
+    if (skipNextSaveRef.current.has(key)) {
+      skipNextSaveRef.current.delete(key);
+      return;
+    }
 
     // Clear any pending save
     if (saveTimeoutRef.current) {
@@ -439,7 +446,12 @@ export default function ComparisonTool() {
 
     // Check if both inputs are provided
     if (!jsonCompareLeft.trim() || !jsonCompareRight.trim()) {
-      // Don't show error if content is being cleared, just return silently
+      // Show error if content is empty or only whitespace
+      setValidationResult({
+        isValid: false,
+        errors: ['Please provide content on both sides to compare'],
+        message: 'Empty content',
+      });
       return;
     }
 
@@ -518,6 +530,17 @@ export default function ComparisonTool() {
     // Clear any previous validation results first
     setValidationResult(undefined);
 
+    // Check if both inputs are provided
+    if (!xmlCompareLeft.trim() || !xmlCompareRight.trim()) {
+      // Show error if content is empty or only whitespace
+      setValidationResult({
+        isValid: false,
+        errors: ['Please provide content on both sides to compare'],
+        message: 'Empty content',
+      });
+      return;
+    }
+
     // Warn about large content
     const totalSize = (new Blob([xmlCompareLeft]).size + new Blob([xmlCompareRight]).size) / (1024 * 1024);
     if (totalSize > 1) {
@@ -551,6 +574,17 @@ export default function ComparisonTool() {
   const handleCompareText = () => {
     // Clear any previous validation results first
     setValidationResult(undefined);
+
+    // Check if both inputs are provided
+    if (!textCompareLeft.trim() || !textCompareRight.trim()) {
+      // Show error if content is empty or only whitespace
+      setValidationResult({
+        isValid: false,
+        errors: ['Please provide content on both sides to compare'],
+        message: 'Empty content',
+      });
+      return;
+    }
 
     // Warn about large content
     const totalSize = (new Blob([textCompareLeft]).size + new Blob([textCompareRight]).size) / (1024 * 1024);
@@ -626,6 +660,9 @@ export default function ComparisonTool() {
 
   // Reset handlers
   const handleResetJSONValidate = () => {
+    // Skip auto-save for this reset
+    skipNextSaveRef.current.add('jsonValidateContent');
+
     setJsonValidateContent('');
     setValidationResult(undefined);
     // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
@@ -633,18 +670,27 @@ export default function ComparisonTool() {
     setCaseSensitive(true);
     setIgnoreKeyOrder(false);
     setIgnoreArrayOrder(false);
+    // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
   const handleResetXMLValidate = () => {
+    // Skip auto-save for this reset
+    skipNextSaveRef.current.add('xmlValidateContent');
+
     setXmlValidateContent('');
     setValidationResult(undefined);
     // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
     setIgnoreWhitespace(false);
     setCaseSensitive(true);
     setIgnoreAttributeOrder(false);
+    // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
   const handleResetJSONCompare = () => {
+    // Skip auto-save for this reset
+    skipNextSaveRef.current.add('jsonCompareLeft');
+    skipNextSaveRef.current.add('jsonCompareRight');
+
     setJsonCompareLeft('');
     setJsonCompareRight('');
     setJsonComparisonResult(undefined);
@@ -653,9 +699,14 @@ export default function ComparisonTool() {
     setCaseSensitive(true);
     setIgnoreKeyOrder(false);
     setIgnoreArrayOrder(false);
+    // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
   const handleResetXMLCompare = () => {
+    // Skip auto-save for this reset
+    skipNextSaveRef.current.add('xmlCompareLeft');
+    skipNextSaveRef.current.add('xmlCompareRight');
+
     setXmlCompareLeft('');
     setXmlCompareRight('');
     setXmlComparisonResult(undefined);
@@ -663,15 +714,21 @@ export default function ComparisonTool() {
     setIgnoreWhitespace(false);
     setCaseSensitive(true);
     setIgnoreAttributeOrder(false);
+    // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
   const handleResetTextCompare = () => {
+    // Skip auto-save for this reset
+    skipNextSaveRef.current.add('textCompareLeft');
+    skipNextSaveRef.current.add('textCompareRight');
+
     setTextCompareLeft('');
     setTextCompareRight('');
     setTextComparisonResult(undefined);
     // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
     setIgnoreWhitespace(false);
     setCaseSensitive(true);
+    // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
   const tabs: TabItem[] = [

@@ -43,7 +43,18 @@ export function validateJSON(content: string): ValidationResult {
   }
 
   try {
-    const parsed = JSON.parse(content);
+    // Remove BOM (Byte Order Mark) and other hidden characters that might cause parsing issues
+    let cleanedContent = content;
+
+    // Remove BOM if present (U+FEFF)
+    if (cleanedContent.charCodeAt(0) === 0xFEFF) {
+      cleanedContent = cleanedContent.slice(1);
+    }
+
+    // Remove zero-width characters and other invisible Unicode characters
+    cleanedContent = cleanedContent.replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+    const parsed = JSON.parse(cleanedContent);
 
     // Check if the parsed result is an object or array (not primitive types)
     if (typeof parsed !== 'object' || parsed === null) {
@@ -264,15 +275,17 @@ function compareJSONLines(
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'remove') {
-      // Line removed from left (exists in left, not in right) - Show in RED on left only
+      // Line removed from left (exists in left, not in right) - Show in RED on left, empty on right
       const escapedLine = escapeHtml(op.line);
       leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
-      // Don't add anything to right side for removed lines
+      // Add empty placeholder on right side to keep alignment
+      rightFullContent += `<div class="line-empty"><span class="line-number"></span></div>\n`;
       leftLineNum++;
     } else if (op.type === 'add') {
-      // Line added to right (exists in right, not in left) - Show in GREEN on right only
+      // Line added to right (exists in right, not in left) - Show in GREEN on right, empty on left
       const escapedLine = escapeHtml(op.line);
-      // Don't add anything to left side for added lines
+      // Add empty placeholder on left side to keep alignment
+      leftFullContent += `<div class="line-empty"><span class="line-number"></span></div>\n`;
       rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
       rightLineNum++;
     }
@@ -609,7 +622,7 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
         const leftLine = leftLines[removeOp.leftIndex!];
 
         let bestMatch = -1;
-        let bestSimilarity = 0.4; // Minimum threshold
+        let bestSimilarity = 0.5; // Lowered from 0.7 to 0.5 - better detection of whitespace-only changes
 
         for (let a = 0; a < adds.length; a++) {
           if (usedAdds.has(a)) continue;
@@ -618,8 +631,13 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
           const rightLine = rightLines[addOp.rightIndex!];
           const similarity = calculateSimilarity(leftLine, rightLine);
 
-          if (similarity > bestSimilarity) {
-            bestSimilarity = similarity;
+          // Special handling: if lines are identical after removing whitespace, treat as high similarity
+          const leftTrimmed = leftLine.replace(/\s+/g, ' ').trim();
+          const rightTrimmed = rightLine.replace(/\s+/g, ' ').trim();
+          const effectiveSimilarity = leftTrimmed === rightTrimmed ? 0.95 : similarity;
+
+          if (effectiveSimilarity > bestSimilarity) {
+            bestSimilarity = effectiveSimilarity;
             bestMatch = a;
           }
         }

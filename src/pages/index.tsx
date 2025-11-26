@@ -42,6 +42,19 @@ import {
   ComparisonResult,
 } from '@/utils/comparison';
 
+// Helper function to clean hidden characters from stored content (outside component to prevent Fast Refresh issues)
+function cleanStoredContent(content: string | null): string {
+  if (!content) return '';
+  let cleaned = content;
+  // Remove BOM if present
+  if (cleaned.charCodeAt(0) === 0xFEFF) {
+    cleaned = cleaned.slice(1);
+  }
+  // Remove zero-width characters
+  cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
+  return cleaned;
+}
+
 export default function ComparisonTool() {
   const { themeMode, toggleTheme } = useContext(ThemeContext);
   const { showError, showSuccess } = useToast();
@@ -86,12 +99,21 @@ export default function ComparisonTool() {
   const [textCompareLeft, setTextCompareLeft] = useState('');
   const [textCompareRight, setTextCompareRight] = useState('');
 
-  // State for options - Default: Only Case Sensitive is ON, all others OFF
-  const [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
-  const [caseSensitive, setCaseSensitive] = useState(true);
-  const [ignoreKeyOrder, setIgnoreKeyOrder] = useState(false);
-  const [ignoreArrayOrder, setIgnoreArrayOrder] = useState(false);
-  const [ignoreAttributeOrder, setIgnoreAttributeOrder] = useState(false);
+  // State for options - Separate for each tab - Default: Only Case Sensitive is ON, all others OFF
+  // JSON Compare options
+  const [jsonIgnoreWhitespace, setJsonIgnoreWhitespace] = useState(false);
+  const [jsonCaseSensitive, setJsonCaseSensitive] = useState(true);
+  const [jsonIgnoreKeyOrder, setJsonIgnoreKeyOrder] = useState(false);
+  const [jsonIgnoreArrayOrder, setJsonIgnoreArrayOrder] = useState(false);
+
+  // XML Compare options
+  const [xmlIgnoreWhitespace, setXmlIgnoreWhitespace] = useState(false);
+  const [xmlCaseSensitive, setXmlCaseSensitive] = useState(true);
+  const [xmlIgnoreAttributeOrder, setXmlIgnoreAttributeOrder] = useState(false);
+
+  // Text Compare options
+  const [textIgnoreWhitespace, setTextIgnoreWhitespace] = useState(false);
+  const [textCaseSensitive, setTextCaseSensitive] = useState(true);
 
   // State for active tab - Initialize with saved value to prevent flicker
   const [activeTab, setActiveTab] = useState(() => {
@@ -160,11 +182,15 @@ export default function ComparisonTool() {
     xmlCompareRight,
     textCompareLeft,
     textCompareRight,
-    ignoreWhitespace,
-    caseSensitive,
-    ignoreKeyOrder,
-    ignoreArrayOrder,
-    ignoreAttributeOrder,
+    jsonIgnoreWhitespace,
+    jsonCaseSensitive,
+    jsonIgnoreKeyOrder,
+    jsonIgnoreArrayOrder,
+    xmlIgnoreWhitespace,
+    xmlCaseSensitive,
+    xmlIgnoreAttributeOrder,
+    textIgnoreWhitespace,
+    textCaseSensitive,
     activeTab,
     isInitialLoadComplete,
   ]);
@@ -173,37 +199,52 @@ export default function ComparisonTool() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        const savedJsonValidate = localStorage.getItem('jsonValidateContent');
-        const savedXmlValidate = localStorage.getItem('xmlValidateContent');
-        const savedJsonLeft = localStorage.getItem('jsonCompareLeft');
-        const savedJsonRight = localStorage.getItem('jsonCompareRight');
-        const savedXmlLeft = localStorage.getItem('xmlCompareLeft');
-        const savedXmlRight = localStorage.getItem('xmlCompareRight');
-        const savedTextLeft = localStorage.getItem('textCompareLeft');
-        const savedTextRight = localStorage.getItem('textCompareRight');
+        const savedJsonValidate = cleanStoredContent(localStorage.getItem('jsonValidateContent'));
+        const savedXmlValidate = cleanStoredContent(localStorage.getItem('xmlValidateContent'));
+        const savedJsonLeft = cleanStoredContent(localStorage.getItem('jsonCompareLeft'));
+        const savedJsonRight = cleanStoredContent(localStorage.getItem('jsonCompareRight'));
+        const savedXmlLeft = cleanStoredContent(localStorage.getItem('xmlCompareLeft'));
+        const savedXmlRight = cleanStoredContent(localStorage.getItem('xmlCompareRight'));
+        const savedTextLeft = cleanStoredContent(localStorage.getItem('textCompareLeft'));
+        const savedTextRight = cleanStoredContent(localStorage.getItem('textCompareRight'));
 
-        // Load toggle states
-        const savedIgnoreWhitespace = localStorage.getItem('ignoreWhitespace');
-        const savedCaseSensitive = localStorage.getItem('caseSensitive');
-        const savedIgnoreKeyOrder = localStorage.getItem('ignoreKeyOrder');
-        const savedIgnoreArrayOrder = localStorage.getItem('ignoreArrayOrder');
-        const savedIgnoreAttributeOrder = localStorage.getItem('ignoreAttributeOrder');
+        // Load toggle states for each tab
+        const savedJsonIgnoreWhitespace = localStorage.getItem('jsonIgnoreWhitespace');
+        const savedJsonCaseSensitive = localStorage.getItem('jsonCaseSensitive');
+        const savedJsonIgnoreKeyOrder = localStorage.getItem('jsonIgnoreKeyOrder');
+        const savedJsonIgnoreArrayOrder = localStorage.getItem('jsonIgnoreArrayOrder');
 
-        if (savedJsonValidate) setJsonValidateContent(savedJsonValidate);
-        if (savedXmlValidate) setXmlValidateContent(savedXmlValidate);
-        if (savedJsonLeft) setJsonCompareLeft(savedJsonLeft);
-        if (savedJsonRight) setJsonCompareRight(savedJsonRight);
-        if (savedXmlLeft) setXmlCompareLeft(savedXmlLeft);
-        if (savedXmlRight) setXmlCompareRight(savedXmlRight);
-        if (savedTextLeft) setTextCompareLeft(savedTextLeft);
-        if (savedTextRight) setTextCompareRight(savedTextRight);
+        const savedXmlIgnoreWhitespace = localStorage.getItem('xmlIgnoreWhitespace');
+        const savedXmlCaseSensitive = localStorage.getItem('xmlCaseSensitive');
+        const savedXmlIgnoreAttributeOrder = localStorage.getItem('xmlIgnoreAttributeOrder');
 
-        // Set toggle states with defaults if not saved
-        if (savedIgnoreWhitespace !== null) setIgnoreWhitespace(savedIgnoreWhitespace === 'true');
-        if (savedCaseSensitive !== null) setCaseSensitive(savedCaseSensitive === 'true');
-        if (savedIgnoreKeyOrder !== null) setIgnoreKeyOrder(savedIgnoreKeyOrder === 'true');
-        if (savedIgnoreArrayOrder !== null) setIgnoreArrayOrder(savedIgnoreArrayOrder === 'true');
-        if (savedIgnoreAttributeOrder !== null) setIgnoreAttributeOrder(savedIgnoreAttributeOrder === 'true');
+        const savedTextIgnoreWhitespace = localStorage.getItem('textIgnoreWhitespace');
+        const savedTextCaseSensitive = localStorage.getItem('textCaseSensitive');
+
+        // Set cleaned content (empty string is valid, so no need to check)
+        setJsonValidateContent(savedJsonValidate);
+        setXmlValidateContent(savedXmlValidate);
+        setJsonCompareLeft(savedJsonLeft);
+        setJsonCompareRight(savedJsonRight);
+        setXmlCompareLeft(savedXmlLeft);
+        setXmlCompareRight(savedXmlRight);
+        setTextCompareLeft(savedTextLeft);
+        setTextCompareRight(savedTextRight);
+
+        // Set JSON toggle states with defaults if not saved
+        if (savedJsonIgnoreWhitespace !== null) setJsonIgnoreWhitespace(savedJsonIgnoreWhitespace === 'true');
+        if (savedJsonCaseSensitive !== null) setJsonCaseSensitive(savedJsonCaseSensitive === 'true');
+        if (savedJsonIgnoreKeyOrder !== null) setJsonIgnoreKeyOrder(savedJsonIgnoreKeyOrder === 'true');
+        if (savedJsonIgnoreArrayOrder !== null) setJsonIgnoreArrayOrder(savedJsonIgnoreArrayOrder === 'true');
+
+        // Set XML toggle states with defaults if not saved
+        if (savedXmlIgnoreWhitespace !== null) setXmlIgnoreWhitespace(savedXmlIgnoreWhitespace === 'true');
+        if (savedXmlCaseSensitive !== null) setXmlCaseSensitive(savedXmlCaseSensitive === 'true');
+        if (savedXmlIgnoreAttributeOrder !== null) setXmlIgnoreAttributeOrder(savedXmlIgnoreAttributeOrder === 'true');
+
+        // Set Text toggle states with defaults if not saved
+        if (savedTextIgnoreWhitespace !== null) setTextIgnoreWhitespace(savedTextIgnoreWhitespace === 'true');
+        if (savedTextCaseSensitive !== null) setTextCaseSensitive(savedTextCaseSensitive === 'true');
 
         // Mark initial load as complete and calculate initial storage size
         setStorageSize(calculateStorageSize());
@@ -225,6 +266,20 @@ export default function ComparisonTool() {
   // State for loading
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
+
+  // Web Worker for heavy comparisons
+  const workerRef = useRef<Worker | null>(null);
+
+  // Initialize Web Worker
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      workerRef.current = new Worker('/comparison-worker.js');
+
+      return () => {
+        workerRef.current?.terminate();
+      };
+    }
+  }, []);
 
   // Auto-save to localStorage whenever content changes
   useEffect(() => {
@@ -305,36 +360,62 @@ export default function ComparisonTool() {
     saveToLocalStorage('activeTab', activeTab);
   }, [activeTab]);
 
-  // Save toggle states to localStorage (only after initial load)
+  // Save JSON toggle states to localStorage (only after initial load)
   useEffect(() => {
     if (isInitialLoadComplete) {
-      saveToLocalStorage('ignoreWhitespace', String(ignoreWhitespace));
+      saveToLocalStorage('jsonIgnoreWhitespace', String(jsonIgnoreWhitespace));
     }
-  }, [ignoreWhitespace, isInitialLoadComplete]);
+  }, [jsonIgnoreWhitespace, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialLoadComplete) {
-      saveToLocalStorage('caseSensitive', String(caseSensitive));
+      saveToLocalStorage('jsonCaseSensitive', String(jsonCaseSensitive));
     }
-  }, [caseSensitive, isInitialLoadComplete]);
+  }, [jsonCaseSensitive, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialLoadComplete) {
-      saveToLocalStorage('ignoreKeyOrder', String(ignoreKeyOrder));
+      saveToLocalStorage('jsonIgnoreKeyOrder', String(jsonIgnoreKeyOrder));
     }
-  }, [ignoreKeyOrder, isInitialLoadComplete]);
+  }, [jsonIgnoreKeyOrder, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialLoadComplete) {
-      saveToLocalStorage('ignoreArrayOrder', String(ignoreArrayOrder));
+      saveToLocalStorage('jsonIgnoreArrayOrder', String(jsonIgnoreArrayOrder));
     }
-  }, [ignoreArrayOrder, isInitialLoadComplete]);
+  }, [jsonIgnoreArrayOrder, isInitialLoadComplete]);
+
+  // Save XML toggle states to localStorage (only after initial load)
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('xmlIgnoreWhitespace', String(xmlIgnoreWhitespace));
+    }
+  }, [xmlIgnoreWhitespace, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialLoadComplete) {
-      saveToLocalStorage('ignoreAttributeOrder', String(ignoreAttributeOrder));
+      saveToLocalStorage('xmlCaseSensitive', String(xmlCaseSensitive));
     }
-  }, [ignoreAttributeOrder, isInitialLoadComplete]);
+  }, [xmlCaseSensitive, isInitialLoadComplete]);
+
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('xmlIgnoreAttributeOrder', String(xmlIgnoreAttributeOrder));
+    }
+  }, [xmlIgnoreAttributeOrder, isInitialLoadComplete]);
+
+  // Save Text toggle states to localStorage (only after initial load)
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('textIgnoreWhitespace', String(textIgnoreWhitespace));
+    }
+  }, [textIgnoreWhitespace, isInitialLoadComplete]);
+
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      saveToLocalStorage('textCaseSensitive', String(textCaseSensitive));
+    }
+  }, [textCaseSensitive, isInitialLoadComplete]);
 
   const handleClearAll = () => {
     setJsonValidateContent('');
@@ -350,12 +431,18 @@ export default function ComparisonTool() {
     setXmlComparisonResult(undefined);
     setTextComparisonResult(undefined);
 
-    // Reset toggle states to defaults
-    setIgnoreWhitespace(false);
-    setCaseSensitive(true); // Default ON
-    setIgnoreKeyOrder(false);
-    setIgnoreArrayOrder(false);
-    setIgnoreAttributeOrder(false);
+    // Reset toggle states to defaults for all tabs
+    setJsonIgnoreWhitespace(false);
+    setJsonCaseSensitive(true); // Default ON
+    setJsonIgnoreKeyOrder(false);
+    setJsonIgnoreArrayOrder(false);
+
+    setXmlIgnoreWhitespace(false);
+    setXmlCaseSensitive(true); // Default ON
+    setXmlIgnoreAttributeOrder(false);
+
+    setTextIgnoreWhitespace(false);
+    setTextCaseSensitive(true); // Default ON
 
     // Clear all content from localStorage and reset toggles to defaults
     if (typeof window !== 'undefined') {
@@ -368,12 +455,20 @@ export default function ComparisonTool() {
       localStorage.removeItem('textCompareLeft');
       localStorage.removeItem('textCompareRight');
 
-      // Set toggle states to defaults in localStorage
-      localStorage.setItem('ignoreWhitespace', 'false');
-      localStorage.setItem('caseSensitive', 'true');
-      localStorage.setItem('ignoreKeyOrder', 'false');
-      localStorage.setItem('ignoreArrayOrder', 'false');
-      localStorage.setItem('ignoreAttributeOrder', 'false');
+      // Set JSON toggle states to defaults in localStorage
+      localStorage.setItem('jsonIgnoreWhitespace', 'false');
+      localStorage.setItem('jsonCaseSensitive', 'true');
+      localStorage.setItem('jsonIgnoreKeyOrder', 'false');
+      localStorage.setItem('jsonIgnoreArrayOrder', 'false');
+
+      // Set XML toggle states to defaults in localStorage
+      localStorage.setItem('xmlIgnoreWhitespace', 'false');
+      localStorage.setItem('xmlCaseSensitive', 'true');
+      localStorage.setItem('xmlIgnoreAttributeOrder', 'false');
+
+      // Set Text toggle states to defaults in localStorage
+      localStorage.setItem('textIgnoreWhitespace', 'false');
+      localStorage.setItem('textCaseSensitive', 'true');
 
       // Update storage size after clearing
       setStorageSize(calculateStorageSize());
@@ -456,10 +551,22 @@ export default function ComparisonTool() {
     }
 
     // Validate that both inputs are valid JSON objects or arrays (not plain strings/primitives)
+    // Clean hidden characters before validation
+    const cleanJSON = (content: string) => {
+      let cleaned = content;
+      // Remove BOM if present
+      if (cleaned.charCodeAt(0) === 0xFEFF) {
+        cleaned = cleaned.slice(1);
+      }
+      // Remove zero-width characters
+      cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
+      return cleaned;
+    };
+
     const errors: string[] = [];
 
     try {
-      const leftParsed = JSON.parse(jsonCompareLeft);
+      const leftParsed = JSON.parse(cleanJSON(jsonCompareLeft));
       if (typeof leftParsed !== 'object' || leftParsed === null) {
         errors.push('JSON must be an object or array, not a primitive value');
       }
@@ -471,7 +578,7 @@ export default function ComparisonTool() {
     }
 
     try {
-      const rightParsed = JSON.parse(jsonCompareRight);
+      const rightParsed = JSON.parse(cleanJSON(jsonCompareRight));
       if (typeof rightParsed !== 'object' || rightParsed === null) {
         // Only add this error if it's not a duplicate
         if (!errors.includes('JSON must be an object or array, not a primitive value')) {
@@ -495,40 +602,125 @@ export default function ComparisonTool() {
       return;
     }
 
-    // Warn about large content
+    // Check file size limits
     const totalSize = (new Blob([jsonCompareLeft]).size + new Blob([jsonCompareRight]).size) / (1024 * 1024);
+
+    // Hard limit: 5MB total
+    if (totalSize > 5) {
+      setValidationResult({
+        isValid: false,
+        errors: [`File size too large (${totalSize.toFixed(2)}MB). Maximum allowed is 5MB total. Please split your files into smaller parts or use a desktop tool for very large files.`],
+        message: 'File size limit exceeded',
+      });
+      return;
+    }
+
+    // Warning for files > 1MB
     if (totalSize > 1) {
       const confirmed = window.confirm(
-        `Combined content size is ${totalSize.toFixed(2)}MB. Processing may take a moment. Continue?`
+        `Combined content size is ${totalSize.toFixed(2)}MB. This may take 1-3 minutes to process. Your browser will remain responsive but please be patient. Continue?`
       );
       if (!confirmed) return;
     }
 
     setIsProcessing(true);
-    setProcessingMessage('Comparing JSON...');
+    setProcessingMessage('Comparing JSON... Please be patient, processing large files in progress.');
 
-    requestAnimationFrame(() => {
+    // Always use Web Worker for files > 0.3MB to prevent blocking
+    if (totalSize > 0.3 && workerRef.current) {
+      const timeoutId = setTimeout(() => {
+        setProcessingMessage('Still processing... Large files take time. Your browser is responsive.');
+      }, 5000);
+
+      workerRef.current.onmessage = (e) => {
+        clearTimeout(timeoutId);
+        const { success, result, error } = e.data;
+
+        if (success) {
+          setJsonComparisonResult(result);
+          setValidationResult(undefined);
+        } else {
+          setValidationResult({
+            isValid: false,
+            errors: [error],
+            message: 'Error during comparison',
+          });
+        }
+
+        setIsProcessing(false);
+        setProcessingMessage('');
+      };
+
+      workerRef.current.onerror = (error) => {
+        clearTimeout(timeoutId);
+        console.error('Worker error:', error);
+        // Fallback to main thread if worker fails
+        setTimeout(() => {
+          try {
+            const result = compareJSON(jsonCompareLeft, jsonCompareRight, {
+              ignoreWhitespace: jsonIgnoreWhitespace,
+              caseSensitive: jsonCaseSensitive,
+              ignoreKeyOrder: jsonIgnoreKeyOrder,
+              ignoreArrayOrder: jsonIgnoreArrayOrder,
+            });
+            setJsonComparisonResult(result);
+            setValidationResult(undefined);
+          } catch (error) {
+            setValidationResult({
+              isValid: false,
+              errors: [error instanceof Error ? error.message : 'Comparison failed'],
+              message: 'Error during comparison',
+            });
+          } finally {
+            setIsProcessing(false);
+            setProcessingMessage('');
+          }
+        }, 100);
+      };
+
+      workerRef.current.postMessage({
+        type: 'compareJSON',
+        data: {
+          left: jsonCompareLeft,
+          right: jsonCompareRight,
+          options: {
+            ignoreWhitespace: jsonIgnoreWhitespace,
+            caseSensitive: jsonCaseSensitive,
+            ignoreKeyOrder: jsonIgnoreKeyOrder,
+            ignoreArrayOrder: jsonIgnoreArrayOrder,
+          }
+        }
+      });
+    } else {
+      // For smaller files, use main thread
       setTimeout(() => {
         try {
           const result = compareJSON(jsonCompareLeft, jsonCompareRight, {
-            ignoreWhitespace,
-            caseSensitive,
-            ignoreKeyOrder,
-            ignoreArrayOrder,
+            ignoreWhitespace: jsonIgnoreWhitespace,
+            caseSensitive: jsonCaseSensitive,
+            ignoreKeyOrder: jsonIgnoreKeyOrder,
+            ignoreArrayOrder: jsonIgnoreArrayOrder,
           });
           setJsonComparisonResult(result);
           setValidationResult(undefined);
+        } catch (error) {
+          setValidationResult({
+            isValid: false,
+            errors: [error instanceof Error ? error.message : 'Comparison failed'],
+            message: 'Error during comparison',
+          });
         } finally {
           setIsProcessing(false);
           setProcessingMessage('');
         }
-      }, 50);
-    });
+      }, 100);
+    }
   };
 
   const handleCompareXML = () => {
     // Clear any previous validation results first
     setValidationResult(undefined);
+    setXmlComparisonResult(undefined);
 
     // Check if both inputs are provided
     if (!xmlCompareLeft.trim() || !xmlCompareRight.trim()) {
@@ -541,39 +733,122 @@ export default function ComparisonTool() {
       return;
     }
 
-    // Warn about large content
+    // Check file size limits
     const totalSize = (new Blob([xmlCompareLeft]).size + new Blob([xmlCompareRight]).size) / (1024 * 1024);
+
+    // Hard limit: 5MB total
+    if (totalSize > 5) {
+      setValidationResult({
+        isValid: false,
+        errors: [`File size too large (${totalSize.toFixed(2)}MB). Maximum allowed is 5MB total. Please split your files into smaller parts or use a desktop tool for very large files.`],
+        message: 'File size limit exceeded',
+      });
+      return;
+    }
+
+    // Warning for files > 1MB
     if (totalSize > 1) {
       const confirmed = window.confirm(
-        `Combined content size is ${totalSize.toFixed(2)}MB. Processing may take a moment. Continue?`
+        `Combined content size is ${totalSize.toFixed(2)}MB. This may take 1-3 minutes to process. Your browser will remain responsive but please be patient. Continue?`
       );
       if (!confirmed) return;
     }
 
     setIsProcessing(true);
-    setProcessingMessage('Comparing XML...');
+    setProcessingMessage('Comparing XML... Please be patient, processing large files in progress.');
 
-    requestAnimationFrame(() => {
+    // Always use Web Worker for files > 0.3MB to prevent blocking
+    if (totalSize > 0.3 && workerRef.current) {
+      const timeoutId = setTimeout(() => {
+        setProcessingMessage('Still processing... Large files take time. Your browser is responsive.');
+      }, 5000);
+
+      workerRef.current.onmessage = (e) => {
+        clearTimeout(timeoutId);
+        const { success, result, error } = e.data;
+
+        if (success) {
+          setXmlComparisonResult(result);
+          setValidationResult(undefined);
+        } else {
+          setValidationResult({
+            isValid: false,
+            errors: [error],
+            message: 'Error during comparison',
+          });
+        }
+
+        setIsProcessing(false);
+        setProcessingMessage('');
+      };
+
+      workerRef.current.onerror = (error) => {
+        clearTimeout(timeoutId);
+        console.error('Worker error:', error);
+        // Fallback to main thread if worker fails
+        setTimeout(() => {
+          try {
+            const result = compareXML(xmlCompareLeft, xmlCompareRight, {
+              ignoreWhitespace: xmlIgnoreWhitespace,
+              caseSensitive: xmlCaseSensitive,
+              ignoreAttributeOrder: xmlIgnoreAttributeOrder,
+            });
+            setXmlComparisonResult(result);
+            setValidationResult(undefined);
+          } catch (error) {
+            setValidationResult({
+              isValid: false,
+              errors: [error instanceof Error ? error.message : 'Comparison failed'],
+              message: 'Error during comparison',
+            });
+          } finally {
+            setIsProcessing(false);
+            setProcessingMessage('');
+          }
+        }, 100);
+      };
+
+      workerRef.current.postMessage({
+        type: 'compareXML',
+        data: {
+          left: xmlCompareLeft,
+          right: xmlCompareRight,
+          options: {
+            ignoreWhitespace: xmlIgnoreWhitespace,
+            caseSensitive: xmlCaseSensitive,
+            ignoreAttributeOrder: xmlIgnoreAttributeOrder,
+          }
+        }
+      });
+    } else {
+      // For smaller files, use main thread
       setTimeout(() => {
         try {
           const result = compareXML(xmlCompareLeft, xmlCompareRight, {
-            ignoreWhitespace,
-            caseSensitive,
-            ignoreAttributeOrder,
+            ignoreWhitespace: xmlIgnoreWhitespace,
+            caseSensitive: xmlCaseSensitive,
+            ignoreAttributeOrder: xmlIgnoreAttributeOrder,
           });
           setXmlComparisonResult(result);
           setValidationResult(undefined);
+        } catch (error) {
+          setValidationResult({
+            isValid: false,
+            errors: [error instanceof Error ? error.message : 'Comparison failed'],
+            message: 'Error during comparison',
+          });
         } finally {
           setIsProcessing(false);
           setProcessingMessage('');
         }
-      }, 50);
-    });
+      }, 100);
+    }
   };
 
   const handleCompareText = () => {
     // Clear any previous validation results first
     setValidationResult(undefined);
+    setTextComparisonResult(undefined);
 
     // Check if both inputs are provided
     if (!textCompareLeft.trim() || !textCompareRight.trim()) {
@@ -586,33 +861,113 @@ export default function ComparisonTool() {
       return;
     }
 
-    // Warn about large content
+    // Check file size limits
     const totalSize = (new Blob([textCompareLeft]).size + new Blob([textCompareRight]).size) / (1024 * 1024);
+
+    // Hard limit: 5MB total
+    if (totalSize > 5) {
+      setValidationResult({
+        isValid: false,
+        errors: [`File size too large (${totalSize.toFixed(2)}MB). Maximum allowed is 5MB total. Please split your files into smaller parts or use a desktop tool for very large files.`],
+        message: 'File size limit exceeded',
+      });
+      return;
+    }
+
+    // Warning for files > 1MB
     if (totalSize > 1) {
       const confirmed = window.confirm(
-        `Combined content size is ${totalSize.toFixed(2)}MB. Processing may take a moment. Continue?`
+        `Combined content size is ${totalSize.toFixed(2)}MB. This may take 1-3 minutes to process. Your browser will remain responsive but please be patient. Continue?`
       );
       if (!confirmed) return;
     }
 
     setIsProcessing(true);
-    setProcessingMessage('Comparing text...');
+    setProcessingMessage('Comparing text... Please be patient, processing large files in progress.');
 
-    requestAnimationFrame(() => {
+    // Always use Web Worker for files > 0.3MB to prevent blocking
+    if (totalSize > 0.3 && workerRef.current) {
+      const timeoutId = setTimeout(() => {
+        setProcessingMessage('Still processing... Large files take time. Your browser is responsive.');
+      }, 5000);
+
+      workerRef.current.onmessage = (e) => {
+        clearTimeout(timeoutId);
+        const { success, result, error } = e.data;
+
+        if (success) {
+          setTextComparisonResult(result);
+          setValidationResult(undefined);
+        } else {
+          setValidationResult({
+            isValid: false,
+            errors: [error],
+            message: 'Error during comparison',
+          });
+        }
+
+        setIsProcessing(false);
+        setProcessingMessage('');
+      };
+
+      workerRef.current.onerror = (error) => {
+        clearTimeout(timeoutId);
+        console.error('Worker error:', error);
+        // Fallback to main thread if worker fails
+        setTimeout(() => {
+          try {
+            const result = compareText(textCompareLeft, textCompareRight, {
+              ignoreWhitespace: textIgnoreWhitespace,
+              caseSensitive: textCaseSensitive,
+            });
+            setTextComparisonResult(result);
+            setValidationResult(undefined);
+          } catch (error) {
+            setValidationResult({
+              isValid: false,
+              errors: [error instanceof Error ? error.message : 'Comparison failed'],
+              message: 'Error during comparison',
+            });
+          } finally {
+            setIsProcessing(false);
+            setProcessingMessage('');
+          }
+        }, 100);
+      };
+
+      workerRef.current.postMessage({
+        type: 'compareText',
+        data: {
+          left: textCompareLeft,
+          right: textCompareRight,
+          options: {
+            ignoreWhitespace: textIgnoreWhitespace,
+            caseSensitive: textCaseSensitive,
+          }
+        }
+      });
+    } else {
+      // For smaller files, use main thread
       setTimeout(() => {
         try {
           const result = compareText(textCompareLeft, textCompareRight, {
-            ignoreWhitespace,
-            caseSensitive,
+            ignoreWhitespace: textIgnoreWhitespace,
+            caseSensitive: textCaseSensitive,
           });
           setTextComparisonResult(result);
           setValidationResult(undefined);
+        } catch (error) {
+          setValidationResult({
+            isValid: false,
+            errors: [error instanceof Error ? error.message : 'Comparison failed'],
+            message: 'Error during comparison',
+          });
         } finally {
           setIsProcessing(false);
           setProcessingMessage('');
         }
-      }, 50);
-    });
+      }, 100);
+    }
   };
 
   const handleTabChange = (key: string) => {
@@ -665,11 +1020,7 @@ export default function ComparisonTool() {
 
     setJsonValidateContent('');
     setValidationResult(undefined);
-    // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
-    setIgnoreWhitespace(false);
-    setCaseSensitive(true);
-    setIgnoreKeyOrder(false);
-    setIgnoreArrayOrder(false);
+    // Note: toggles are NOT reset - they are separate for each tab
     // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
@@ -679,10 +1030,7 @@ export default function ComparisonTool() {
 
     setXmlValidateContent('');
     setValidationResult(undefined);
-    // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
-    setIgnoreWhitespace(false);
-    setCaseSensitive(true);
-    setIgnoreAttributeOrder(false);
+    // Note: toggles are NOT reset - they are separate for each tab
     // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
@@ -694,11 +1042,11 @@ export default function ComparisonTool() {
     setJsonCompareLeft('');
     setJsonCompareRight('');
     setJsonComparisonResult(undefined);
-    // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
-    setIgnoreWhitespace(false);
-    setCaseSensitive(true);
-    setIgnoreKeyOrder(false);
-    setIgnoreArrayOrder(false);
+    // Reset JSON toggles to defaults: Only Case Sensitive ON, all others OFF
+    setJsonIgnoreWhitespace(false);
+    setJsonCaseSensitive(true);
+    setJsonIgnoreKeyOrder(false);
+    setJsonIgnoreArrayOrder(false);
     // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
@@ -710,10 +1058,10 @@ export default function ComparisonTool() {
     setXmlCompareLeft('');
     setXmlCompareRight('');
     setXmlComparisonResult(undefined);
-    // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
-    setIgnoreWhitespace(false);
-    setCaseSensitive(true);
-    setIgnoreAttributeOrder(false);
+    // Reset XML toggles to defaults: Only Case Sensitive ON, all others OFF
+    setXmlIgnoreWhitespace(false);
+    setXmlCaseSensitive(true);
+    setXmlIgnoreAttributeOrder(false);
     // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
@@ -725,9 +1073,9 @@ export default function ComparisonTool() {
     setTextCompareLeft('');
     setTextCompareRight('');
     setTextComparisonResult(undefined);
-    // Reset toggles to defaults: Only Case Sensitive ON, all others OFF
-    setIgnoreWhitespace(false);
-    setCaseSensitive(true);
+    // Reset Text toggles to defaults: Only Case Sensitive ON, all others OFF
+    setTextIgnoreWhitespace(false);
+    setTextCaseSensitive(true);
     // Note: localStorage is NOT cleared - content will restore on refresh
   };
 
@@ -803,10 +1151,10 @@ export default function ComparisonTool() {
         <>
           <OptionsRow style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <Toggle label="Ignore Whitespace" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} />
-              <Toggle label="Case Sensitive" checked={caseSensitive} onChange={setCaseSensitive} />
-              <Toggle label="Ignore Key Order" checked={ignoreKeyOrder} onChange={setIgnoreKeyOrder} />
-              <Toggle label="Ignore Array Order" checked={ignoreArrayOrder} onChange={setIgnoreArrayOrder} />
+              <Toggle label="Ignore Whitespace" checked={jsonIgnoreWhitespace} onChange={setJsonIgnoreWhitespace} />
+              <Toggle label="Case Sensitive" checked={jsonCaseSensitive} onChange={setJsonCaseSensitive} />
+              <Toggle label="Ignore Key Order" checked={jsonIgnoreKeyOrder} onChange={setJsonIgnoreKeyOrder} />
+              <Toggle label="Ignore Array Order" checked={jsonIgnoreArrayOrder} onChange={setJsonIgnoreArrayOrder} />
               <StorageIndicator>
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
@@ -982,9 +1330,9 @@ export default function ComparisonTool() {
         <>
           <OptionsRow style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <Toggle label="Ignore Whitespace" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} />
-              <Toggle label="Case Sensitive" checked={caseSensitive} onChange={setCaseSensitive} />
-              <Toggle label="Ignore Attribute Order" checked={ignoreAttributeOrder} onChange={setIgnoreAttributeOrder} />
+              <Toggle label="Ignore Whitespace" checked={xmlIgnoreWhitespace} onChange={setXmlIgnoreWhitespace} />
+              <Toggle label="Case Sensitive" checked={xmlCaseSensitive} onChange={setXmlCaseSensitive} />
+              <Toggle label="Ignore Attribute Order" checked={xmlIgnoreAttributeOrder} onChange={setXmlIgnoreAttributeOrder} />
               <StorageIndicator>
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
@@ -1096,8 +1444,8 @@ export default function ComparisonTool() {
         <>
           <OptionsRow style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <Toggle label="Ignore Whitespace" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} />
-              <Toggle label="Case Sensitive" checked={caseSensitive} onChange={setCaseSensitive} />
+              <Toggle label="Ignore Whitespace" checked={textIgnoreWhitespace} onChange={setTextIgnoreWhitespace} />
+              <Toggle label="Case Sensitive" checked={textCaseSensitive} onChange={setTextCaseSensitive} />
               <StorageIndicator>
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />

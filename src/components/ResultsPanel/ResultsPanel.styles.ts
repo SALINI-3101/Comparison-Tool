@@ -164,6 +164,17 @@ export const ValueContent = styled.pre<{ $diffType?: 'added' | 'removed' | 'modi
     background-color: transparent;
   }
 
+  .line-empty {
+    display: flex;
+    align-items: baseline;
+    padding: 4px 8px;
+    margin: 0;
+    min-height: 24px;
+    line-height: 1.6;
+    background-color: transparent;
+    opacity: 0.3;
+  }
+
   .line-number {
     display: inline-block;
     min-width: 40px;

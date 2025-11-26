@@ -20,16 +20,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
   const [fileMetadata, setFileMetadata] = useState<FileMetadata | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Check if value is empty - if so, don't show file metadata
-  const isEmpty = value === '' || value === null || value === undefined;
-  const shouldShowMetadata = !isEmpty && fileMetadata !== null;
+  // Show file metadata based on fileMetadata state and content existence
+  const shouldShowMetadata = fileMetadata !== null && value.trim() !== '';
 
   // Clear fileMetadata when value becomes empty (e.g., after Reset button)
   useEffect(() => {
+    const isEmpty = !value || value.trim() === '';
     if (isEmpty && fileMetadata !== null) {
       setFileMetadata(null);
     }
-  }, [isEmpty, fileMetadata]);
+  }, [value]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;

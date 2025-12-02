@@ -41,8 +41,8 @@ export const ResultsBody = styled.div`
 `;
 
 export const DifferenceItem = styled.div<{ $diffType?: 'added' | 'removed' | 'modified' }>`
-  padding: 12px;
-  margin-bottom: 12px;
+  padding: 6px;
+  margin-bottom: 6px;
   background: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(255, 255, 255, 0.05)' : theme.colors.gray[50]};
   border-radius: 4px;
   transition: background 0.3s ease;
@@ -54,14 +54,14 @@ export const DifferenceItem = styled.div<{ $diffType?: 'added' | 'removed' | 'mo
 
 export const DifferencePath = styled.div`
   font-weight: 600;
-  font-size: 14px;
+  font-size: 12px;
   color: ${({ theme }) => theme.colors.text};
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   transition: color 0.3s ease;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: wrap;
 `;
 
@@ -84,7 +84,7 @@ export const DifferenceTypeBadge = styled.span<{ $type: 'added' | 'removed' | 'm
 export const DifferenceValues = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 6px;
 
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
@@ -92,7 +92,7 @@ export const DifferenceValues = styled.div`
 `;
 
 export const DifferenceValue = styled.div<{ $type: 'left' | 'right'; $diffType?: 'added' | 'removed' | 'modified' }>`
-  padding: 4px;
+  padding: 2px;
   background: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(255, 255, 255, 0.08)' : theme.colors.cardBackground};
   border-radius: 6px;
   border: 2px solid ${({ $type, theme, $diffType }) => {
@@ -105,59 +105,59 @@ export const DifferenceValue = styled.div<{ $type: 'left' | 'right'; $diffType?:
 `;
 
 export const ValueLabel = styled.div`
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: ${({ theme }) => theme.colors.subtleText};
-  margin-bottom: 4px;
+  margin-bottom: 1px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   transition: color 0.3s ease;
 `;
 
-export const ValueContent = styled.pre<{ $diffType?: 'added' | 'removed' | 'modified' }>`
+export const ValueContent = styled.div<{ $diffType?: 'added' | 'removed' | 'modified' }>`
   margin: 0;
-  padding: 8px;
-  font-size: 13px;
+  padding: 0;
+  font-size: 12px;
   font-family: 'Segoe UI', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Consolas', 'Monaco', 'Courier New', monospace;
   color: ${({ theme }) => theme.colors.text};
   white-space: pre-wrap;
   word-break: break-word;
   transition: all 0.3s ease;
-  background-color: transparent;
+  background-color: transparent !important;
   border-radius: 4px;
   overflow-x: auto;
 
+  /* Base styles for all line types */
+  & > div,
   .line-diff,
   .line-added,
   .line-removed,
-  .line-same {
-    display: flex;
+  .line-same,
+  .line-modified {
+    display: flex !important;
     align-items: baseline;
-    padding: 4px 8px;
+    padding: 1px 6px;
     margin: 0;
-    min-height: 24px;
-    line-height: 1.6;
+    min-height: 18px;
+    line-height: 1.3;
+    visibility: visible !important;
   }
 
   .line-added {
-    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(16, 185, 129, 0.3)' : '#a7f3d0'};
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(16, 185, 129, 0.3)' : '#a7f3d0'} !important;
   }
 
   .line-removed {
-    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(239, 68, 68, 0.3)' : '#fecaca'};
+    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(239, 68, 68, 0.3)' : '#fecaca'} !important;
   }
 
   .line-modified {
-    background-color: ${({ theme }) => theme.colors.background === '#111827' ? 'rgba(251, 191, 36, 0.3)' : '#fde68a'};
+    display: flex !important;
+    background-color: transparent !important;
   }
 
   .line-diff {
-    background-color: ${({ theme, $diffType }) => {
-      if ($diffType === 'added') return theme.colors.background === '#111827' ? 'rgba(16, 185, 129, 0.3)' : '#a7f3d0';
-      if ($diffType === 'removed') return theme.colors.background === '#111827' ? 'rgba(239, 68, 68, 0.3)' : '#fecaca';
-      if ($diffType === 'modified') return theme.colors.background === '#111827' ? 'rgba(251, 191, 36, 0.3)' : '#fde68a';
-      return 'transparent';
-    }};
+    background-color: transparent !important;
   }
 
   .line-same {
@@ -167,25 +167,26 @@ export const ValueContent = styled.pre<{ $diffType?: 'added' | 'removed' | 'modi
   .line-empty {
     display: flex;
     align-items: baseline;
-    padding: 4px 8px;
+    padding: 1px 6px;
     margin: 0;
-    min-height: 24px;
-    line-height: 1.6;
+    min-height: 18px;
+    line-height: 1.3;
     background-color: transparent;
     opacity: 0.3;
   }
 
   .line-number {
     display: inline-block;
-    min-width: 40px;
-    padding-right: 12px;
-    margin-right: 12px;
+    min-width: 32px;
+    padding-right: 6px;
+    margin-right: 6px;
     color: ${({ theme }) => theme.colors.subtleText};
     text-align: right;
     user-select: none;
     flex-shrink: 0;
     border-right: 1px solid ${({ theme }) => theme.colors.border};
     font-weight: 600;
+    font-size: 11px;
   }
 
   mark {

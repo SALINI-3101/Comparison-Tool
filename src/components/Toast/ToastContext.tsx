@@ -37,16 +37,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newToast: ToastItem = { id, type, title, message, duration };
 
     setToasts((prev) => {
-      // Check if there's already a toast with the same title and message
-      const isDuplicate = prev.some(
-        (toast) => toast.title === title && toast.message === message && toast.type === type
-      );
-
-      // If duplicate exists and it's recent (within 500ms), don't add another
-      if (isDuplicate) {
-        return prev;
-      }
-
       // Add new toast and keep only the last MAX_TOASTS toasts
       const updatedToasts = [...prev, newToast];
       return updatedToasts.slice(-MAX_TOASTS);

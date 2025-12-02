@@ -28,7 +28,6 @@ import {
   DualEditorContainer,
   ActionButton,
   ValidateButtonGroup,
-  StorageIndicator,
 } from '@/components/ComparisonTool';
 import { ThemeContext } from './_app';
 import {
@@ -38,6 +37,9 @@ import {
   compareXML,
   compareText,
   downloadContent,
+  prettifyJSON,
+  prettifyXML,
+  prettifyText,
   ValidationResult,
   ComparisonResult,
 } from '@/utils/comparison';
@@ -80,9 +82,16 @@ export default function ComparisonTool() {
     // Schedule save after 300ms of no typing
     saveTimeoutRef.current = setTimeout(() => {
       try {
+        // Skip saving very large content to localStorage (>100KB) to prevent freezing
+        // localStorage has a ~5-10MB limit and saving large strings blocks the UI
+        const sizeInKB = new Blob([value]).size / 1024;
+        if (sizeInKB > 100) {
+          console.log(`[Storage] Skipping localStorage save for ${key} (${sizeInKB.toFixed(2)}KB - too large)`);
+          return;
+        }
         localStorage.setItem(key, value);
       } catch {
-        // Silently fail - localStorage might be disabled
+        // Silently fail - localStorage might be disabled or quota exceeded
       }
     }, 300);
   };
@@ -115,6 +124,10 @@ export default function ComparisonTool() {
   const [textIgnoreWhitespace, setTextIgnoreWhitespace] = useState(false);
   const [textCaseSensitive, setTextCaseSensitive] = useState(true);
 
+  // State to track prettification status for JSON Compare
+  const [jsonLeftPrettified, setJsonLeftPrettified] = useState(false);
+  const [jsonRightPrettified, setJsonRightPrettified] = useState(false);
+
   // State for active tab - Initialize with saved value to prevent flicker
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -130,70 +143,6 @@ export default function ComparisonTool() {
 
   // Track if initial load is complete
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
-
-  // State for storage size
-  const [storageSize, setStorageSize] = useState('0 KB');
-
-  // Function to calculate localStorage size (only content keys, exclude settings)
-  const calculateStorageSize = () => {
-    if (typeof window === 'undefined') return '0.00 KB';
-    try {
-      let totalSize = 0;
-
-      // Only count content keys (exclude toggle settings and activeTab)
-      const contentKeys = [
-        'jsonValidateContent',
-        'xmlValidateContent',
-        'jsonCompareLeft',
-        'jsonCompareRight',
-        'xmlCompareLeft',
-        'xmlCompareRight',
-        'textCompareLeft',
-        'textCompareRight'
-      ];
-
-      // Only count content data
-      for (const key of contentKeys) {
-        const value = localStorage.getItem(key);
-        if (value !== null) {
-          totalSize += value.length + key.length;
-        }
-      }
-
-      // Convert bytes to KB with 2 decimal places
-      const sizeInKB = (totalSize / 1024).toFixed(2);
-      return `${sizeInKB} KB`;
-    } catch {
-      return '0.00 KB';
-    }
-  };
-
-  // Update storage size whenever content changes
-  useEffect(() => {
-    if (isInitialLoadComplete) {
-      setStorageSize(calculateStorageSize());
-    }
-  }, [
-    jsonValidateContent,
-    xmlValidateContent,
-    jsonCompareLeft,
-    jsonCompareRight,
-    xmlCompareLeft,
-    xmlCompareRight,
-    textCompareLeft,
-    textCompareRight,
-    jsonIgnoreWhitespace,
-    jsonCaseSensitive,
-    jsonIgnoreKeyOrder,
-    jsonIgnoreArrayOrder,
-    xmlIgnoreWhitespace,
-    xmlCaseSensitive,
-    xmlIgnoreAttributeOrder,
-    textIgnoreWhitespace,
-    textCaseSensitive,
-    activeTab,
-    isInitialLoadComplete,
-  ]);
 
   // Load from localStorage after component mounts (client-side only)
   useEffect(() => {
@@ -246,16 +195,39 @@ export default function ComparisonTool() {
         if (savedTextIgnoreWhitespace !== null) setTextIgnoreWhitespace(savedTextIgnoreWhitespace === 'true');
         if (savedTextCaseSensitive !== null) setTextCaseSensitive(savedTextCaseSensitive === 'true');
 
-        // Mark initial load as complete and calculate initial storage size
-        setStorageSize(calculateStorageSize());
+        // Mark initial load as complete
         setIsInitialLoadComplete(true);
       } catch {
         // Silently fail - localStorage might be disabled
-        setStorageSize(calculateStorageSize());
         setIsInitialLoadComplete(true);
       }
     }
   }, []);
+
+  // Track previous values to detect manual content changes
+  const prevJsonLeftRef = useRef(jsonCompareLeft);
+  const prevJsonRightRef = useRef(jsonCompareRight);
+
+  // Reset prettification flags when content is manually changed (not by prettify)
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      // Only reset if content actually changed from previous value
+      if (jsonCompareLeft !== prevJsonLeftRef.current) {
+        setJsonLeftPrettified(false);
+        prevJsonLeftRef.current = jsonCompareLeft;
+      }
+    }
+  }, [jsonCompareLeft, isInitialLoadComplete]);
+
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      // Only reset if content actually changed from previous value
+      if (jsonCompareRight !== prevJsonRightRef.current) {
+        setJsonRightPrettified(false);
+        prevJsonRightRef.current = jsonCompareRight;
+      }
+    }
+  }, [jsonCompareRight, isInitialLoadComplete]);
 
   // State for results
   const [validationResult, setValidationResult] = useState<ValidationResult | undefined>(undefined);
@@ -270,10 +242,69 @@ export default function ComparisonTool() {
   // Web Worker for heavy comparisons
   const workerRef = useRef<Worker | null>(null);
 
-  // Initialize Web Worker
+  // Refs for accumulating progressive chunks
+  const chunkAccumulatorRef = useRef<{
+    left: string;
+    right: string;
+    stats: { added: number; removed: number; modified: number };
+  }>({ left: '', right: '', stats: { added: 0, removed: 0, modified: 0 } });
+
+  // Ref for throttling DOM updates with requestAnimationFrame
+  const rafIdRef = useRef<number | null>(null);
+  const pendingUpdateRef = useRef<boolean>(false);
+
+  // Helper function to throttle DOM updates using requestAnimationFrame
+  const scheduleUpdate = (updateFn: () => void) => {
+    if (!pendingUpdateRef.current) {
+      pendingUpdateRef.current = true;
+      rafIdRef.current = requestAnimationFrame(() => {
+        updateFn();
+        pendingUpdateRef.current = false;
+      });
+    }
+  };
+
+  // Cleanup RAF on unmount
   useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+    };
+  }, []);
+
+  // Initialize Web Worker with aggressive cache busting
+   useEffect(() => {
     if (typeof window !== 'undefined') {
-      workerRef.current = new Worker('/comparison-worker.js');
+      // Use timestamp + random number for maximum cache busting
+      const cacheKey = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Fetch worker file with no-cache headers and create blob URL
+      fetch(`/comparison-worker.js?v=${cacheKey}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      })
+        .then(response => response.text())
+        .then(workerCode => {
+          const blob = new Blob([workerCode], { type: 'application/javascript' });
+          const workerUrl = URL.createObjectURL(blob);
+          workerRef.current = new Worker(workerUrl);
+          console.log('[Main] Worker initialized successfully with enhanced cache busting');
+        })
+        .catch(error => {
+          console.error('[Main] Failed to load worker:', error);
+          // Fallback to direct worker if blob approach fails
+          try {
+            workerRef.current = new Worker(`/comparison-worker.js?v=${cacheKey}`);
+            console.log('[Main] Worker initialized with fallback method');
+          } catch (fallbackError) {
+            console.error('[Main] Fallback worker also failed:', fallbackError);
+          }
+        });
 
       return () => {
         workerRef.current?.terminate();
@@ -285,14 +316,14 @@ export default function ComparisonTool() {
   useEffect(() => {
     saveToLocalStorage('jsonValidateContent', jsonValidateContent);
     if (!jsonValidateContent) {
-      setValidationResult(prev => prev ? undefined : prev);
+      setValidationResult(prev => prev !== undefined ? undefined : prev);
     }
   }, [jsonValidateContent]);
 
   useEffect(() => {
     saveToLocalStorage('xmlValidateContent', xmlValidateContent);
     if (!xmlValidateContent) {
-      setValidationResult(prev => prev ? undefined : prev);
+      setValidationResult(prev => prev !== undefined ? undefined : prev);
     }
   }, [xmlValidateContent]);
 
@@ -308,11 +339,18 @@ export default function ComparisonTool() {
     }
   }, [jsonCompareRight, isInitialLoadComplete]);
 
+  // Clear JSON comparison result when input changes (improves performance)
+  useEffect(() => {
+    if (jsonComparisonResult) {
+      setJsonComparisonResult(undefined);
+    }
+  }, [jsonCompareLeft, jsonCompareRight]);
+
   // Auto-clear JSON Compare results when either side is empty
   useEffect(() => {
     if (!jsonCompareLeft.trim() || !jsonCompareRight.trim()) {
-      setValidationResult(prev => prev ? undefined : prev);
-      setJsonComparisonResult(prev => prev ? undefined : prev);
+      setValidationResult(prev => prev !== undefined ? undefined : prev);
+      setJsonComparisonResult(prev => prev !== undefined ? undefined : prev);
     }
   }, [jsonCompareLeft, jsonCompareRight]);
 
@@ -328,11 +366,18 @@ export default function ComparisonTool() {
     }
   }, [xmlCompareRight, isInitialLoadComplete]);
 
+  // Clear XML comparison result when input changes (improves performance)
+  useEffect(() => {
+    if (xmlComparisonResult) {
+      setXmlComparisonResult(undefined);
+    }
+  }, [xmlCompareLeft, xmlCompareRight]);
+
   // Auto-clear XML Compare results when either side is empty
   useEffect(() => {
     if (!xmlCompareLeft.trim() || !xmlCompareRight.trim()) {
-      setValidationResult(prev => prev ? undefined : prev);
-      setXmlComparisonResult(prev => prev ? undefined : prev);
+      setValidationResult(prev => prev !== undefined ? undefined : prev);
+      setXmlComparisonResult(prev => prev !== undefined ? undefined : prev);
     }
   }, [xmlCompareLeft, xmlCompareRight]);
 
@@ -348,11 +393,18 @@ export default function ComparisonTool() {
     }
   }, [textCompareRight, isInitialLoadComplete]);
 
+  // Clear Text comparison result when input changes (improves performance)
+  useEffect(() => {
+    if (textComparisonResult) {
+      setTextComparisonResult(undefined);
+    }
+  }, [textCompareLeft, textCompareRight]);
+
   // Auto-clear Text Compare results when either side is empty
   useEffect(() => {
     if (!textCompareLeft.trim() || !textCompareRight.trim()) {
-      setValidationResult(prev => prev ? undefined : prev);
-      setTextComparisonResult(prev => prev ? undefined : prev);
+      setValidationResult(prev => prev !== undefined ? undefined : prev);
+      setTextComparisonResult(prev => prev !== undefined ? undefined : prev);
     }
   }, [textCompareLeft, textCompareRight]);
 
@@ -469,24 +521,19 @@ export default function ComparisonTool() {
       // Set Text toggle states to defaults in localStorage
       localStorage.setItem('textIgnoreWhitespace', 'false');
       localStorage.setItem('textCaseSensitive', 'true');
-
-      // Update storage size after clearing
-      setStorageSize(calculateStorageSize());
     }
   };
 
   const handleValidateJSON = () => {
-    // Warn about large content
+    setIsProcessing(true);
+
+    // Show appropriate message for large content
     const sizeInMB = new Blob([jsonValidateContent]).size / (1024 * 1024);
     if (sizeInMB > 0.5) {
-      const confirmed = window.confirm(
-        `This content is ${sizeInMB.toFixed(2)}MB. Processing may take a moment. Continue?`
-      );
-      if (!confirmed) return;
+      setProcessingMessage(`Validating ${sizeInMB.toFixed(2)}MB JSON... Please wait`);
+    } else {
+      setProcessingMessage('Validating JSON...');
     }
-
-    setIsProcessing(true);
-    setProcessingMessage('Validating JSON...');
 
     // Use requestAnimationFrame to allow UI to update before heavy processing
     requestAnimationFrame(() => {
@@ -505,18 +552,54 @@ export default function ComparisonTool() {
     });
   };
 
-  const handleValidateXML = () => {
-    // Warn about large content
-    const sizeInMB = new Blob([xmlValidateContent]).size / (1024 * 1024);
+  const handlePrettifyJSON = () => {
+    setIsProcessing(true);
+
+    // Show appropriate message for large content
+    const sizeInMB = new Blob([jsonValidateContent]).size / (1024 * 1024);
     if (sizeInMB > 0.5) {
-      const confirmed = window.confirm(
-        `This content is ${sizeInMB.toFixed(2)}MB. Processing may take a moment. Continue?`
-      );
-      if (!confirmed) return;
+      setProcessingMessage(`Prettifying ${sizeInMB.toFixed(2)}MB JSON... Please wait`);
+    } else {
+      setProcessingMessage('Prettifying JSON...');
     }
 
+    // Use requestAnimationFrame to allow UI to update before heavy processing
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          const result = prettifyJSON(jsonValidateContent);
+
+          // If prettification succeeded and we have prettified content, update the text area
+          if (result.isValid && result.prettified) {
+            setJsonValidateContent(result.prettified);
+
+            // Show toast notification ONLY (no validation result panel)
+            if (result.corrections && result.corrections.length > 0) {
+              showSuccess('JSON Prettified', `Formatted successfully with ${result.corrections.length} correction(s)`);
+            } else {
+              showSuccess('JSON Prettified', 'Formatted successfully');
+            }
+          } else {
+            showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+          }
+        } finally {
+          setIsProcessing(false);
+          setProcessingMessage('');
+        }
+      }, 50);
+    });
+  };
+
+  const handleValidateXML = () => {
     setIsProcessing(true);
-    setProcessingMessage('Validating XML...');
+
+    // Show appropriate message for large content
+    const sizeInMB = new Blob([xmlValidateContent]).size / (1024 * 1024);
+    if (sizeInMB > 0.5) {
+      setProcessingMessage(`Validating ${sizeInMB.toFixed(2)}MB XML... Please wait`);
+    } else {
+      setProcessingMessage('Validating XML...');
+    }
 
     requestAnimationFrame(() => {
       setTimeout(() => {
@@ -535,6 +618,10 @@ export default function ComparisonTool() {
   };
 
   const handleCompareJSON = () => {
+    // Show full loader IMMEDIATELY before any processing
+    setIsProcessing(true);
+    setProcessingMessage('Preparing comparison...');
+
     // Clear any previous results first
     setValidationResult(undefined);
     setJsonComparisonResult(undefined);
@@ -547,112 +634,149 @@ export default function ComparisonTool() {
         errors: ['Please provide content on both sides to compare'],
         message: 'Empty content',
       });
+      setIsProcessing(false);
+      setProcessingMessage('');
       return;
     }
 
-    // Validate that both inputs are valid JSON objects or arrays (not plain strings/primitives)
-    // Clean hidden characters before validation
-    const cleanJSON = (content: string) => {
-      let cleaned = content;
-      // Remove BOM if present
-      if (cleaned.charCodeAt(0) === 0xFEFF) {
-        cleaned = cleaned.slice(1);
-      }
-      // Remove zero-width characters
-      cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
-      return cleaned;
-    };
+    // Use requestAnimationFrame to ensure loader is visible before heavy processing
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        // Validate that both inputs are valid JSON objects or arrays (not plain strings/primitives)
+        // Clean hidden characters before validation
+        const cleanJSON = (content: string) => {
+          let cleaned = content;
+          // Remove BOM if present
+          if (cleaned.charCodeAt(0) === 0xFEFF) {
+            cleaned = cleaned.slice(1);
+          }
+          // Remove zero-width characters
+          cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
+          return cleaned;
+        };
 
-    const errors: string[] = [];
+        const errors: string[] = [];
 
-    try {
-      const leftParsed = JSON.parse(cleanJSON(jsonCompareLeft));
-      if (typeof leftParsed !== 'object' || leftParsed === null) {
-        errors.push('JSON must be an object or array, not a primitive value');
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Invalid JSON syntax';
-      if (!errors.includes(errorMessage)) {
-        errors.push(errorMessage);
-      }
-    }
-
-    try {
-      const rightParsed = JSON.parse(cleanJSON(jsonCompareRight));
-      if (typeof rightParsed !== 'object' || rightParsed === null) {
-        // Only add this error if it's not a duplicate
-        if (!errors.includes('JSON must be an object or array, not a primitive value')) {
-          errors.push('JSON must be an object or array, not a primitive value');
+        try {
+          const leftParsed = JSON.parse(cleanJSON(jsonCompareLeft));
+          if (typeof leftParsed !== 'object' || leftParsed === null) {
+            errors.push('JSON must be an object or array, not a primitive value');
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Invalid JSON syntax';
+          if (!errors.includes(errorMessage)) {
+            errors.push(errorMessage);
+          }
         }
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Invalid JSON syntax';
-      if (!errors.includes(errorMessage)) {
-        errors.push(errorMessage);
-      }
-    }
 
-    // If there are validation errors, show them in the results panel
-    if (errors.length > 0) {
-      setValidationResult({
-        isValid: false,
-        message: 'Invalid JSON',
-        errors: errors,
-      });
-      return;
-    }
+        try {
+          const rightParsed = JSON.parse(cleanJSON(jsonCompareRight));
+          if (typeof rightParsed !== 'object' || rightParsed === null) {
+            // Only add this error if it's not a duplicate
+            if (!errors.includes('JSON must be an object or array, not a primitive value')) {
+              errors.push('JSON must be an object or array, not a primitive value');
+            }
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Invalid JSON syntax';
+          if (!errors.includes(errorMessage)) {
+            errors.push(errorMessage);
+          }
+        }
 
-    // Check file size limits
-    const totalSize = (new Blob([jsonCompareLeft]).size + new Blob([jsonCompareRight]).size) / (1024 * 1024);
+        // If there are validation errors, show them in the results panel
+        if (errors.length > 0) {
+          setValidationResult({
+            isValid: false,
+            message: 'Invalid JSON',
+            errors: errors,
+          });
+          setIsProcessing(false);
+          setProcessingMessage('');
+          return;
+        }
 
-    // Hard limit: 5MB total
-    if (totalSize > 5) {
-      setValidationResult({
-        isValid: false,
-        errors: [`File size too large (${totalSize.toFixed(2)}MB). Maximum allowed is 5MB total. Please split your files into smaller parts or use a desktop tool for very large files.`],
-        message: 'File size limit exceeded',
-      });
-      return;
-    }
+        // Check file size limits
+        const totalSize = (new Blob([jsonCompareLeft]).size + new Blob([jsonCompareRight]).size) / (1024 * 1024);
 
-    // Warning for files > 1MB
-    if (totalSize > 1) {
-      const confirmed = window.confirm(
-        `Combined content size is ${totalSize.toFixed(2)}MB. This may take 1-3 minutes to process. Your browser will remain responsive but please be patient. Continue?`
-      );
-      if (!confirmed) return;
-    }
+        // Hard limit: 5MB total
+        if (totalSize > 5) {
+          setValidationResult({
+            isValid: false,
+            errors: [`File size too large (${totalSize.toFixed(2)}MB). Maximum allowed is 5MB total. Please split your files into smaller parts or use a desktop tool for very large files.`],
+            message: 'File size limit exceeded',
+          });
+          setIsProcessing(false);
+          setProcessingMessage('');
+          return;
+        }
 
-    setIsProcessing(true);
-    setProcessingMessage('Comparing JSON... Please be patient, processing large files in progress.');
+        // Show appropriate message for large files
+        if (totalSize > 1) {
+          setProcessingMessage(`Comparing ${totalSize.toFixed(2)}MB JSON... Processing large files, please be patient`);
+        } else {
+          setProcessingMessage('Comparing JSON... Please be patient, processing large files in progress.');
+        }
 
     // Always use Web Worker for files > 0.3MB to prevent blocking
     if (totalSize > 0.3 && workerRef.current) {
-      const timeoutId = setTimeout(() => {
-        setProcessingMessage('Still processing... Large files take time. Your browser is responsive.');
-      }, 5000);
+      // Reset chunk accumulator at start of new comparison
+      chunkAccumulatorRef.current = { left: '', right: '', stats: { added: 0, removed: 0, modified: 0 } };
 
       workerRef.current.onmessage = (e) => {
-        clearTimeout(timeoutId);
-        const { success, result, error } = e.data;
+        const { success, result, error, isChunk, isLastChunk, chunkNumber, totalChunks } = e.data;
 
         if (success) {
-          setJsonComparisonResult(result);
-          setValidationResult(undefined);
+          if (isChunk) {
+            // Progressive chunk received - accumulate
+            if (result.differences && result.differences[0]) {
+              chunkAccumulatorRef.current.left += result.differences[0].leftValue || '';
+              chunkAccumulatorRef.current.right += result.differences[0].rightValue || '';
+            }
+
+            // Update processing message immediately
+            const progress = Math.round((chunkNumber / totalChunks) * 100);
+            setProcessingMessage(`Processing large file: ${progress}% complete (${chunkNumber}/${totalChunks} chunks)`);
+
+            // Only update display on LAST chunk - keep loader visible until complete
+            if (isLastChunk) {
+              scheduleUpdate(() => {
+                setJsonComparisonResult({
+                  areEqual: false,
+                  differences: [{
+                    path: 'Full Document',
+                    leftValue: chunkAccumulatorRef.current.left,
+                    rightValue: chunkAccumulatorRef.current.right,
+                    type: 'modified',
+                  }],
+                  message: result.message,
+                  statistics: result.statistics,
+                });
+                // Hide loader and show results
+                setIsProcessing(false);
+                setProcessingMessage('');
+              });
+              chunkAccumulatorRef.current.stats = result.statistics;
+            }
+          } else {
+            // Non-chunked result (fallback or small files)
+            setJsonComparisonResult(result);
+            setValidationResult(undefined);
+            setIsProcessing(false);
+            setProcessingMessage('');
+          }
         } else {
           setValidationResult({
             isValid: false,
             errors: [error],
             message: 'Error during comparison',
           });
+          setIsProcessing(false);
+          setProcessingMessage('');
         }
-
-        setIsProcessing(false);
-        setProcessingMessage('');
       };
 
       workerRef.current.onerror = (error) => {
-        clearTimeout(timeoutId);
         console.error('Worker error:', error);
         // Fallback to main thread if worker fails
         setTimeout(() => {
@@ -715,6 +839,8 @@ export default function ComparisonTool() {
         }
       }, 100);
     }
+      }, 50); // Small delay to ensure loader is visible
+    });
   };
 
   const handleCompareXML = () => {
@@ -746,44 +872,74 @@ export default function ComparisonTool() {
       return;
     }
 
-    // Warning for files > 1MB
-    if (totalSize > 1) {
-      const confirmed = window.confirm(
-        `Combined content size is ${totalSize.toFixed(2)}MB. This may take 1-3 minutes to process. Your browser will remain responsive but please be patient. Continue?`
-      );
-      if (!confirmed) return;
-    }
-
     setIsProcessing(true);
-    setProcessingMessage('Comparing XML... Please be patient, processing large files in progress.');
+
+    // Show appropriate message for large files
+    if (totalSize > 1) {
+      setProcessingMessage(`Comparing ${totalSize.toFixed(2)}MB XML... Processing large files, please be patient`);
+    } else {
+      setProcessingMessage('Comparing XML... Please be patient, processing large files in progress.');
+    }
 
     // Always use Web Worker for files > 0.3MB to prevent blocking
     if (totalSize > 0.3 && workerRef.current) {
-      const timeoutId = setTimeout(() => {
-        setProcessingMessage('Still processing... Large files take time. Your browser is responsive.');
-      }, 5000);
+      // Reset chunk accumulator at start of new comparison
+      chunkAccumulatorRef.current = { left: '', right: '', stats: { added: 0, removed: 0, modified: 0 } };
 
       workerRef.current.onmessage = (e) => {
-        clearTimeout(timeoutId);
-        const { success, result, error } = e.data;
+        const { success, result, error, isChunk, isLastChunk, chunkNumber, totalChunks } = e.data;
 
         if (success) {
-          setXmlComparisonResult(result);
-          setValidationResult(undefined);
+          if (isChunk) {
+            // Progressive chunk received - accumulate
+            if (result.differences && result.differences[0]) {
+              chunkAccumulatorRef.current.left += result.differences[0].leftValue || '';
+              chunkAccumulatorRef.current.right += result.differences[0].rightValue || '';
+            }
+
+            // Update processing message immediately
+            const progress = Math.round((chunkNumber / totalChunks) * 100);
+            setProcessingMessage(`Processing large file: ${progress}% complete (${chunkNumber}/${totalChunks} chunks)`);
+
+            // Only update display on LAST chunk - keep loader visible until complete
+            if (isLastChunk) {
+              scheduleUpdate(() => {
+                setXmlComparisonResult({
+                  areEqual: false,
+                  differences: [{
+                    path: 'Full Document',
+                    leftValue: chunkAccumulatorRef.current.left,
+                    rightValue: chunkAccumulatorRef.current.right,
+                    type: 'modified',
+                  }],
+                  message: result.message,
+                  statistics: result.statistics,
+                });
+                // Hide loader and show results
+                setIsProcessing(false);
+                setProcessingMessage('');
+              });
+              chunkAccumulatorRef.current.stats = result.statistics;
+            }
+          } else {
+            // Non-chunked result (fallback or small files)
+            setXmlComparisonResult(result);
+            setValidationResult(undefined);
+            setIsProcessing(false);
+            setProcessingMessage('');
+          }
         } else {
           setValidationResult({
             isValid: false,
             errors: [error],
             message: 'Error during comparison',
           });
+          setIsProcessing(false);
+          setProcessingMessage('');
         }
-
-        setIsProcessing(false);
-        setProcessingMessage('');
       };
 
       workerRef.current.onerror = (error) => {
-        clearTimeout(timeoutId);
         console.error('Worker error:', error);
         // Fallback to main thread if worker fails
         setTimeout(() => {
@@ -874,44 +1030,74 @@ export default function ComparisonTool() {
       return;
     }
 
-    // Warning for files > 1MB
-    if (totalSize > 1) {
-      const confirmed = window.confirm(
-        `Combined content size is ${totalSize.toFixed(2)}MB. This may take 1-3 minutes to process. Your browser will remain responsive but please be patient. Continue?`
-      );
-      if (!confirmed) return;
-    }
-
     setIsProcessing(true);
-    setProcessingMessage('Comparing text... Please be patient, processing large files in progress.');
+
+    // Show appropriate message for large files
+    if (totalSize > 1) {
+      setProcessingMessage(`Comparing ${totalSize.toFixed(2)}MB text... Processing large files, please be patient`);
+    } else {
+      setProcessingMessage('Comparing text... Please be patient, processing large files in progress.');
+    }
 
     // Always use Web Worker for files > 0.3MB to prevent blocking
     if (totalSize > 0.3 && workerRef.current) {
-      const timeoutId = setTimeout(() => {
-        setProcessingMessage('Still processing... Large files take time. Your browser is responsive.');
-      }, 5000);
+      // Reset chunk accumulator at start of new comparison
+      chunkAccumulatorRef.current = { left: '', right: '', stats: { added: 0, removed: 0, modified: 0 } };
 
       workerRef.current.onmessage = (e) => {
-        clearTimeout(timeoutId);
-        const { success, result, error } = e.data;
+        const { success, result, error, isChunk, isLastChunk, chunkNumber, totalChunks } = e.data;
 
         if (success) {
-          setTextComparisonResult(result);
-          setValidationResult(undefined);
+          if (isChunk) {
+            // Progressive chunk received - accumulate
+            if (result.differences && result.differences[0]) {
+              chunkAccumulatorRef.current.left += result.differences[0].leftValue || '';
+              chunkAccumulatorRef.current.right += result.differences[0].rightValue || '';
+            }
+
+            // Update processing message immediately
+            const progress = Math.round((chunkNumber / totalChunks) * 100);
+            setProcessingMessage(`Processing large file: ${progress}% complete (${chunkNumber}/${totalChunks} chunks)`);
+
+            // Only update display on LAST chunk - keep loader visible until complete
+            if (isLastChunk) {
+              scheduleUpdate(() => {
+                setTextComparisonResult({
+                  areEqual: false,
+                  differences: [{
+                    path: 'Full Document',
+                    leftValue: chunkAccumulatorRef.current.left,
+                    rightValue: chunkAccumulatorRef.current.right,
+                    type: 'modified',
+                  }],
+                  message: result.message,
+                  statistics: result.statistics,
+                });
+                // Hide loader and show results
+                setIsProcessing(false);
+                setProcessingMessage('');
+              });
+              chunkAccumulatorRef.current.stats = result.statistics;
+            }
+          } else {
+            // Non-chunked result (fallback or small files)
+            setTextComparisonResult(result);
+            setValidationResult(undefined);
+            setIsProcessing(false);
+            setProcessingMessage('');
+          }
         } else {
           setValidationResult({
             isValid: false,
             errors: [error],
             message: 'Error during comparison',
           });
+          setIsProcessing(false);
+          setProcessingMessage('');
         }
-
-        setIsProcessing(false);
-        setProcessingMessage('');
       };
 
       workerRef.current.onerror = (error) => {
-        clearTimeout(timeoutId);
         console.error('Worker error:', error);
         // Fallback to main thread if worker fails
         setTimeout(() => {
@@ -982,12 +1168,12 @@ export default function ComparisonTool() {
   // Download handlers
   const handleDownloadJSON = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    downloadContent(jsonValidateContent, `json-validate-${timestamp}.json`, 'json');
+    downloadContent(jsonValidateContent, `json-validate-${timestamp}.json`);
   };
 
   const handleDownloadXML = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    downloadContent(xmlValidateContent, `xml-validate-${timestamp}.xml`, 'xml');
+    downloadContent(xmlValidateContent, `xml-validate-${timestamp}.xml`);
   };
 
   const handleCopyToClipboard = async (content: string, label: string = 'Content') => {
@@ -999,11 +1185,12 @@ export default function ComparisonTool() {
     }
   };
 
-  const handlePasteFromClipboard = async (setter: (content: string) => void, label: string = 'Content') => {
+  const handlePasteFromClipboard = async (setter: React.Dispatch<React.SetStateAction<string>>, label: string = 'Content') => {
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        setter(text);
+        // Append clipboard content to existing content
+        setter((prev) => prev + text);
         showSuccess('Pasted!', `${label} pasted from clipboard successfully`);
       } else {
         showError('Paste Failed', 'Clipboard is empty');
@@ -1042,6 +1229,9 @@ export default function ComparisonTool() {
     setJsonCompareLeft('');
     setJsonCompareRight('');
     setJsonComparisonResult(undefined);
+    // Reset prettification flags
+    setJsonLeftPrettified(false);
+    setJsonRightPrettified(false);
     // Reset JSON toggles to defaults: Only Case Sensitive ON, all others OFF
     setJsonIgnoreWhitespace(false);
     setJsonCaseSensitive(true);
@@ -1088,17 +1278,14 @@ export default function ComparisonTool() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
               <SectionTitle style={{ margin: 0, paddingTop: '8px' }}>Input Content</SectionTitle>
-              <StorageIndicator>
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                </svg>
-                Storage: {storageSize}
-              </StorageIndicator>
             </div>
             <ValidateButtonGroup>
               <ActionButton $variant="secondary" onClick={handleResetJSONValidate} disabled={!jsonValidateContent}>
                 <RefreshIcon />
                 Reset
+              </ActionButton>
+              <ActionButton $variant="secondary" onClick={handlePrettifyJSON} disabled={!jsonValidateContent}>
+                ✨ Prettify
               </ActionButton>
               <ActionButton $variant="primary" onClick={handleValidateJSON} disabled={!jsonValidateContent}>
                 <PlayIcon />
@@ -1155,19 +1342,18 @@ export default function ComparisonTool() {
               <Toggle label="Case Sensitive" checked={jsonCaseSensitive} onChange={setJsonCaseSensitive} />
               <Toggle label="Ignore Key Order" checked={jsonIgnoreKeyOrder} onChange={setJsonIgnoreKeyOrder} />
               <Toggle label="Ignore Array Order" checked={jsonIgnoreArrayOrder} onChange={setJsonIgnoreArrayOrder} />
-              <StorageIndicator>
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                </svg>
-                Storage: {storageSize}
-              </StorageIndicator>
             </div>
             <ValidateButtonGroup>
               <ActionButton $variant="secondary" onClick={handleResetJSONCompare} disabled={!jsonCompareLeft && !jsonCompareRight}>
                 <RefreshIcon />
                 Reset
               </ActionButton>
-              <ActionButton $variant="primary" onClick={handleCompareJSON} disabled={!jsonCompareLeft || !jsonCompareRight}>
+              <ActionButton
+                $variant="primary"
+                onClick={handleCompareJSON}
+                disabled={!jsonCompareLeft || !jsonCompareRight || !jsonLeftPrettified || !jsonRightPrettified}
+                title={!jsonLeftPrettified || !jsonRightPrettified ? "Prettify both sides first" : "Compare JSON"}
+              >
                 <CompareIcon />
                 Spot Differences
               </ActionButton>
@@ -1186,20 +1372,31 @@ export default function ComparisonTool() {
                   </ActionButton>
                   <ActionButton $variant="secondary" onClick={() => {
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    downloadContent(jsonCompareLeft, `json-base-version-${timestamp}.json`, 'json');
+                    downloadContent(jsonCompareLeft, `json-base-version-${timestamp}.json`);
                   }} disabled={!jsonCompareLeft} title="Download">
                     <DownloadIcon />
+                  </ActionButton>
+                  <ActionButton $variant="secondary" onClick={() => {
+                    const result = prettifyJSON(jsonCompareLeft);
+                    if (result.isValid && result.prettified) {
+                      setJsonCompareLeft(result.prettified);
+                      prevJsonLeftRef.current = result.prettified; // Update ref to prevent useEffect from resetting flag
+                      setJsonLeftPrettified(true);
+                      if (result.corrections && result.corrections.length > 0) {
+                        showSuccess('Prettified', `${result.corrections.length} correction(s) applied`);
+                      } else {
+                        showSuccess('Prettified', 'Formatted successfully');
+                      }
+                    } else {
+                      showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+                    }
+                  }} disabled={!jsonCompareLeft} title="Prettify JSON">
+                    ✨
                   </ActionButton>
                 </div>
                 <FileUpload
                   onFileLoad={(content) => {
-                    setIsProcessing(true);
-                    setProcessingMessage('Loading file content...');
-                    setTimeout(() => {
-                      setJsonCompareLeft(content);
-                      setIsProcessing(false);
-                      setProcessingMessage('');
-                    }, 100);
+                    setJsonCompareLeft(content);
                   }}
                   acceptedTypes={['.json']}
                   label="json-compare-left"
@@ -1224,20 +1421,31 @@ export default function ComparisonTool() {
                   </ActionButton>
                   <ActionButton $variant="secondary" onClick={() => {
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    downloadContent(jsonCompareRight, `json-modified-version-${timestamp}.json`, 'json');
+                    downloadContent(jsonCompareRight, `json-modified-version-${timestamp}.json`);
                   }} disabled={!jsonCompareRight} title="Download">
                     <DownloadIcon />
+                  </ActionButton>
+                  <ActionButton $variant="secondary" onClick={() => {
+                    const result = prettifyJSON(jsonCompareRight);
+                    if (result.isValid && result.prettified) {
+                      setJsonCompareRight(result.prettified);
+                      prevJsonRightRef.current = result.prettified; // Update ref to prevent useEffect from resetting flag
+                      setJsonRightPrettified(true);
+                      if (result.corrections && result.corrections.length > 0) {
+                        showSuccess('Prettified', `${result.corrections.length} correction(s) applied`);
+                      } else {
+                        showSuccess('Prettified', 'Formatted successfully');
+                      }
+                    } else {
+                      showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+                    }
+                  }} disabled={!jsonCompareRight} title="Prettify JSON">
+                    ✨
                   </ActionButton>
                 </div>
                 <FileUpload
                   onFileLoad={(content) => {
-                    setIsProcessing(true);
-                    setProcessingMessage('Loading file content...');
-                    setTimeout(() => {
-                      setJsonCompareRight(content);
-                      setIsProcessing(false);
-                      setProcessingMessage('');
-                    }, 100);
+                    setJsonCompareRight(content);
                   }}
                   acceptedTypes={['.json']}
                   label="json-compare-right"
@@ -1267,12 +1475,6 @@ export default function ComparisonTool() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
               <SectionTitle style={{ margin: 0, paddingTop: '8px' }}>Input Content</SectionTitle>
-              <StorageIndicator>
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                </svg>
-                Storage: {storageSize}
-              </StorageIndicator>
             </div>
             <ValidateButtonGroup>
               <ActionButton $variant="secondary" onClick={handleResetXMLValidate} disabled={!xmlValidateContent}>
@@ -1333,12 +1535,6 @@ export default function ComparisonTool() {
               <Toggle label="Ignore Whitespace" checked={xmlIgnoreWhitespace} onChange={setXmlIgnoreWhitespace} />
               <Toggle label="Case Sensitive" checked={xmlCaseSensitive} onChange={setXmlCaseSensitive} />
               <Toggle label="Ignore Attribute Order" checked={xmlIgnoreAttributeOrder} onChange={setXmlIgnoreAttributeOrder} />
-              <StorageIndicator>
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                </svg>
-                Storage: {storageSize}
-              </StorageIndicator>
             </div>
             <ValidateButtonGroup>
               <ActionButton $variant="secondary" onClick={handleResetXMLCompare} disabled={!xmlCompareLeft && !xmlCompareRight}>
@@ -1364,9 +1560,20 @@ export default function ComparisonTool() {
                   </ActionButton>
                   <ActionButton $variant="secondary" onClick={() => {
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    downloadContent(xmlCompareLeft, `xml-base-version-${timestamp}.xml`, 'xml');
+                    downloadContent(xmlCompareLeft, `xml-base-version-${timestamp}.xml`);
                   }} disabled={!xmlCompareLeft} title="Download">
                     <DownloadIcon />
+                  </ActionButton>
+                  <ActionButton $variant="secondary" onClick={() => {
+                    const result = prettifyXML(xmlCompareLeft);
+                    if (result.isValid && result.prettified) {
+                      setXmlCompareLeft(result.prettified);
+                      showSuccess('Prettified', 'XML formatted successfully');
+                    } else {
+                      showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+                    }
+                  }} disabled={!xmlCompareLeft} title="Prettify XML">
+                    ✨
                   </ActionButton>
                 </div>
                 <FileUpload
@@ -1402,9 +1609,20 @@ export default function ComparisonTool() {
                   </ActionButton>
                   <ActionButton $variant="secondary" onClick={() => {
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    downloadContent(xmlCompareRight, `xml-modified-version-${timestamp}.xml`, 'xml');
+                    downloadContent(xmlCompareRight, `xml-modified-version-${timestamp}.xml`);
                   }} disabled={!xmlCompareRight} title="Download">
                     <DownloadIcon />
+                  </ActionButton>
+                  <ActionButton $variant="secondary" onClick={() => {
+                    const result = prettifyXML(xmlCompareRight);
+                    if (result.isValid && result.prettified) {
+                      setXmlCompareRight(result.prettified);
+                      showSuccess('Prettified', 'XML formatted successfully');
+                    } else {
+                      showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+                    }
+                  }} disabled={!xmlCompareRight} title="Prettify XML">
+                    ✨
                   </ActionButton>
                 </div>
                 <FileUpload
@@ -1446,12 +1664,6 @@ export default function ComparisonTool() {
             <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
               <Toggle label="Ignore Whitespace" checked={textIgnoreWhitespace} onChange={setTextIgnoreWhitespace} />
               <Toggle label="Case Sensitive" checked={textCaseSensitive} onChange={setTextCaseSensitive} />
-              <StorageIndicator>
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                </svg>
-                Storage: {storageSize}
-              </StorageIndicator>
             </div>
             <ValidateButtonGroup>
               <ActionButton $variant="secondary" onClick={handleResetTextCompare} disabled={!textCompareLeft && !textCompareRight}>
@@ -1477,9 +1689,20 @@ export default function ComparisonTool() {
                   </ActionButton>
                   <ActionButton $variant="secondary" onClick={() => {
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    downloadContent(textCompareLeft, `text-base-version-${timestamp}.txt`, 'txt');
+                    downloadContent(textCompareLeft, `text-base-version-${timestamp}.txt`);
                   }} disabled={!textCompareLeft} title="Download">
                     <DownloadIcon />
+                  </ActionButton>
+                  <ActionButton $variant="secondary" onClick={() => {
+                    const result = prettifyText(textCompareLeft);
+                    if (result.isValid && result.prettified) {
+                      setTextCompareLeft(result.prettified);
+                      showSuccess('Prettified', 'Text formatted successfully');
+                    } else {
+                      showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+                    }
+                  }} disabled={!textCompareLeft} title="Prettify Text">
+                    ✨
                   </ActionButton>
                 </div>
                 <FileUpload
@@ -1515,9 +1738,20 @@ export default function ComparisonTool() {
                   </ActionButton>
                   <ActionButton $variant="secondary" onClick={() => {
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    downloadContent(textCompareRight, `text-modified-version-${timestamp}.txt`, 'txt');
+                    downloadContent(textCompareRight, `text-modified-version-${timestamp}.txt`);
                   }} disabled={!textCompareRight} title="Download">
                     <DownloadIcon />
+                  </ActionButton>
+                  <ActionButton $variant="secondary" onClick={() => {
+                    const result = prettifyText(textCompareRight);
+                    if (result.isValid && result.prettified) {
+                      setTextCompareRight(result.prettified);
+                      showSuccess('Prettified', 'Text formatted successfully');
+                    } else {
+                      showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
+                    }
+                  }} disabled={!textCompareRight} title="Prettify Text">
+                    ✨
                   </ActionButton>
                 </div>
                 <FileUpload

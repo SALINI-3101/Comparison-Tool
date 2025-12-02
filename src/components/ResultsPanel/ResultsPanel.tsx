@@ -73,6 +73,46 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({ validationResult, co
               {validationResult.errors.map((error, index) => (
                 <ErrorMessage key={index}>{error}</ErrorMessage>
               ))}
+              {validationResult.corrections && validationResult.corrections.length > 0 && (
+                <div style={{
+                  marginTop: '16px',
+                  padding: '12px',
+                  background: '#fee2e2',
+                  border: '2px solid #f87171',
+                  borderRadius: '8px',
+                }}>
+                  <div style={{
+                    fontWeight: 600,
+                    marginBottom: '8px',
+                    color: '#991b1b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}>
+                    <span style={{ fontSize: '18px' }}>⚠️</span>
+                    Attempted Corrections:
+                  </div>
+                  <ul style={{
+                    margin: 0,
+                    paddingLeft: '24px',
+                    color: '#991b1b',
+                  }}>
+                    {validationResult.corrections.map((correction, index) => (
+                      <li key={index} style={{ marginBottom: '4px', fontFamily: 'monospace', fontSize: '13px' }}>
+                        {correction}
+                      </li>
+                    ))}
+                  </ul>
+                  <div style={{
+                    marginTop: '8px',
+                    fontSize: '13px',
+                    fontStyle: 'italic',
+                    color: '#991b1b',
+                  }}>
+                    The JSON structure is still invalid after these corrections. Please review the error message above.
+                  </div>
+                </div>
+              )}
             </>
           )}
         </ResultsBody>

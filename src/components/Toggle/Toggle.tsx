@@ -9,7 +9,7 @@ export interface ToggleProps {
   className?: string;
 }
 
-export const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange, disabled = false, className }) => {
+const ToggleComponent: React.FC<ToggleProps> = ({ label, checked, onChange, disabled = false, className }) => {
   const handleToggle = () => {
     if (!disabled) {
       onChange(!checked);
@@ -33,3 +33,7 @@ export const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange, disabl
     </ToggleContainer>
   );
 };
+
+ToggleComponent.displayName = 'Toggle';
+
+export const Toggle = React.memo(ToggleComponent);

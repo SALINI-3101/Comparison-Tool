@@ -15,7 +15,7 @@ interface FileMetadata {
   type: string;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedTypes = ['.json', '.xml', '.txt'], label, value = '', onError }) => {
+const FileUploadComponent: React.FC<FileUploadProps> = ({ onFileLoad, acceptedTypes = ['.json', '.xml', '.txt'], label, value = '', onError }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [fileMetadata, setFileMetadata] = useState<FileMetadata | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,8 +82,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
     // Set loading state to true
     setIsLoading(true);
 
-    // Use async file reading with Promise wrapper
-    const readFileAsync = (file: File): Promise<string> => {
+    // Method 1: Try reading as text (standard approach)
+    const readAsText = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target?.result as string);
@@ -92,8 +92,79 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
       });
     };
 
+    // Method 2: Try reading as ArrayBuffer and convert to text (fallback)
+    const readAsArrayBuffer = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const arrayBuffer = e.target?.result as ArrayBuffer;
+            const decoder = new TextDecoder('utf-8');
+            const text = decoder.decode(arrayBuffer);
+            resolve(text);
+          } catch (decodeError) {
+            reject(decodeError);
+          }
+        };
+        reader.onerror = (e) => reject(e);
+        reader.readAsArrayBuffer(file);
+      });
+    };
+
+    // Method 3: Try reading in chunks (for very large files)
+    const readInChunks = async (file: File): Promise<string> => {
+      const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+      const chunks: string[] = [];
+      let offset = 0;
+
+      while (offset < file.size) {
+        const blob = file.slice(offset, offset + CHUNK_SIZE);
+        const chunk = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = (e) => reject(e);
+          reader.readAsText(blob);
+        });
+        chunks.push(chunk);
+        offset += CHUNK_SIZE;
+      }
+
+      return chunks.join('');
+    };
+
     try {
-      const content = await readFileAsync(file);
+      console.log(`[FileUpload] Reading file: ${file.name}, size: ${formatFileSize(file.size)}`);
+
+      let content: string;
+      let method = 'unknown';
+
+      // Try Method 1: Standard text reading
+      try {
+        console.log('[FileUpload] Attempting Method 1: readAsText');
+        content = await readAsText(file);
+        method = 'readAsText';
+        console.log(`[FileUpload] ✓ Method 1 succeeded, content length: ${content.length} characters`);
+      } catch (error1) {
+        console.warn('[FileUpload] ✗ Method 1 failed:', error1);
+
+        // Try Method 2: ArrayBuffer conversion
+        try {
+          console.log('[FileUpload] Attempting Method 2: readAsArrayBuffer');
+          content = await readAsArrayBuffer(file);
+          method = 'readAsArrayBuffer';
+          console.log(`[FileUpload] ✓ Method 2 succeeded, content length: ${content.length} characters`);
+        } catch (error2) {
+          console.warn('[FileUpload] ✗ Method 2 failed:', error2);
+
+          // Try Method 3: Chunked reading
+          console.log('[FileUpload] Attempting Method 3: readInChunks');
+          content = await readInChunks(file);
+          method = 'readInChunks';
+          console.log(`[FileUpload] ✓ Method 3 succeeded, content length: ${content.length} characters`);
+        }
+      }
+
+      console.log(`[FileUpload] File read successfully using ${method}`);
 
       // Use setTimeout to defer the state update and callback
       setTimeout(() => {
@@ -106,8 +177,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
         onFileLoad(content, file.name, file.size, metadata.type);
         setIsLoading(false); // Stop loading after file is processed
       }, 0);
-    } catch {
-      const errorMessage = 'Failed to read file. Please try again.';
+    } catch (error) {
+      console.error('[FileUpload] All file reading methods failed:', error);
+      const errorMessage = `Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}. File size: ${formatFileSize(file.size)}`;
       if (onError) {
         onError(errorMessage);
       } else {
@@ -231,3 +303,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileLoad, acceptedType
     </UploadContainer>
   );
 };
+
+FileUploadComponent.displayName = 'FileUpload';
+
+export const FileUpload = React.memo(FileUploadComponent);

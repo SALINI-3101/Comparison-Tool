@@ -16,10 +16,11 @@ export const ThemeContext = createContext<{
 });
 
 function App({ Component, pageProps }: AppProps) {
-  // Initialize theme - use undefined to indicate we haven't checked yet
-  const [themeMode, setThemeMode] = useState<ThemeMode | undefined>(undefined);
+  // Initialize with light theme to match server render
+  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
+  const [mounted, setMounted] = useState(false);
 
-  // On mount, read the theme that was set by the blocking script
+  // Sync with actual theme immediately after hydration
   useEffect(() => {
     // Read from data-theme attribute (set by _document.tsx blocking script)
     const dataTheme = document.documentElement.getAttribute('data-theme') as ThemeMode | null;
@@ -27,74 +28,45 @@ function App({ Component, pageProps }: AppProps) {
       setThemeMode(dataTheme);
     } else {
       // Fallback to localStorage
-      const savedTheme = localStorage.getItem('theme') as ThemeMode | null;
-      if (savedTheme === 'dark' || savedTheme === 'light') {
-        setThemeMode(savedTheme);
-        document.documentElement.setAttribute('data-theme', savedTheme);
-      } else {
-        setThemeMode('light');
+      try {
+        const savedTheme = localStorage.getItem('theme') as ThemeMode | null;
+        if (savedTheme === 'dark' || savedTheme === 'light') {
+          setThemeMode(savedTheme);
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        } else {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      } catch {
+        // localStorage might be disabled
         document.documentElement.setAttribute('data-theme', 'light');
       }
     }
+
+    // Mark as mounted
+    setMounted(true);
+
+    // Add preload class initially to disable transitions
+    document.body.classList.add('preload');
+
+    // Remove preload class after a short delay to enable transitions
+    const timer = setTimeout(() => {
+      document.body.classList.remove('preload');
+    }, 50);
+
+    return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    if (!themeMode) return;
-
-    // Set data-theme attribute on HTML element
-    document.documentElement.setAttribute('data-theme', themeMode);
-
-    // Mark app as hydrated to prevent FOUC
-    document.getElementById('__next')?.classList.add('hydrated');
-
-    // Note: We're not preventing default drag/drop at window level
-    // because it blocks access to dataTransfer.files in React handlers
-    // Users should drop files only in the designated drop zones
-  }, [themeMode]);
+  // Don't render anything until mounted to prevent flash
+  if (!mounted) {
+    return null;
+  }
 
   const toggleTheme = () => {
-    if (!themeMode) return;
     const newTheme = themeMode === 'light' ? 'dark' : 'light';
     setThemeMode(newTheme);
     localStorage.setItem('theme', newTheme);
     document.documentElement.setAttribute('data-theme', newTheme);
   };
-
-  // Show a minimal loading state while determining theme
-  if (!themeMode) {
-    return (
-      <div style={{
-        position: 'fixed',
-        inset: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#ffffff',
-        color: '#374151',
-      }}>
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '16px'
-        }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            border: '4px solid #e5e7eb',
-            borderTopColor: '#8B5CF6',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite'
-          }} />
-          <style>{`
-            @keyframes spin {
-              to { transform: rotate(360deg); }
-            }
-          `}</style>
-        </div>
-      </div>
-    );
-  }
 
   const currentTheme = themeMode === 'light' ? lightTheme : darkTheme;
 

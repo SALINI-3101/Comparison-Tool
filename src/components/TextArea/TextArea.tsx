@@ -1,11 +1,10 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef } from 'react';
 import {
   TextAreaContainer,
   TextAreaLabel,
   StyledTextArea,
   LabelDot,
   EditorWrapper,
-  LineNumbers,
   TextAreaWrapper
 } from './TextArea.styles';
 
@@ -19,7 +18,7 @@ export interface TextAreaProps {
   className?: string;
 }
 
-export const TextArea: React.FC<TextAreaProps> = ({
+const TextAreaComponent: React.FC<TextAreaProps> = ({
   label,
   value,
   onChange,
@@ -29,21 +28,6 @@ export const TextArea: React.FC<TextAreaProps> = ({
   className,
 }) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const lineNumbersRef = useRef<HTMLDivElement>(null);
-  const [lineCount, setLineCount] = useState(1);
-
-  // Update line count when value changes
-  useEffect(() => {
-    const lines = value.split('\n').length;
-    setLineCount(lines);
-  }, [value]);
-
-  // Sync scroll between textarea and line numbers
-  const handleScroll = () => {
-    if (textAreaRef.current && lineNumbersRef.current) {
-      lineNumbersRef.current.scrollTop = textAreaRef.current.scrollTop;
-    }
-  };
 
   return (
     <TextAreaContainer className={className}>
@@ -52,17 +36,11 @@ export const TextArea: React.FC<TextAreaProps> = ({
         {label}
       </TextAreaLabel>
       <EditorWrapper>
-        <LineNumbers ref={lineNumbersRef}>
-          {Array.from({ length: lineCount }, (_, i) => (
-            <div key={i + 1}>{i + 1}</div>
-          ))}
-        </LineNumbers>
         <TextAreaWrapper>
           <StyledTextArea
             ref={textAreaRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            onScroll={handleScroll}
             placeholder={placeholder}
             disabled={disabled}
           />
@@ -71,3 +49,19 @@ export const TextArea: React.FC<TextAreaProps> = ({
     </TextAreaContainer>
   );
 };
+
+TextAreaComponent.displayName = 'TextArea';
+
+export const TextArea = React.memo(TextAreaComponent, (prevProps, nextProps) => {
+  // Custom comparison: only re-render if value actually changed (reference equality for performance)
+  // or if other props changed
+  return (
+    prevProps.value === nextProps.value &&
+    prevProps.label === nextProps.label &&
+    prevProps.placeholder === nextProps.placeholder &&
+    prevProps.disabled === nextProps.disabled &&
+    prevProps.labelColor === nextProps.labelColor &&
+    prevProps.className === nextProps.className &&
+    prevProps.onChange === nextProps.onChange
+  );
+});

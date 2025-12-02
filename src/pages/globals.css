@@ -40,3 +40,14 @@ body {
   }
 }
 
+/* Disable transitions during initial render to prevent flickering */
+.preload * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Reduce transition duration to minimize flickering */
+* {
+  transition-duration: 0.15s !important;
+}
+

@@ -2,6 +2,8 @@ export interface ValidationResult {
   isValid: boolean;
   errors: string[];
   message: string;
+  prettified?: string; // Formatted/corrected JSON
+  corrections?: string[]; // List of corrections made
 }
 
 export interface ComparisonResult {
@@ -252,53 +254,60 @@ function compareJSONLines(
     return { differences: [], diffCount: 0, statistics: { added: 0, removed: 0, modified: 0 } };
   }
 
-  // Build HTML content - show ALL lines for JSON (not context-based)
-  let leftFullContent = '';
-  let rightFullContent = '';
+  // Build full document diff view - show all content with optimized spacing
+  const differences: Difference[] = [];
+  let leftContent = '';
+  let rightContent = '';
   let leftLineNum = 1;
   let rightLineNum = 1;
 
-  diffOps.forEach((op) => {
+  // Process all lines
+  for (let i = 0; i < diffOps.length; i++) {
+    const op = diffOps[i];
+
     if (op.type === 'keep') {
-      // Same line on both sides
       const escapedLine = escapeHtml(op.line);
-      leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
-      rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      leftContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>`;
+      rightContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>`;
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'modify') {
-      // Line modified (exists on both sides but different) - Show in YELLOW with highlighting
       const highlightedLeft = highlightJSONDifference(op.line, op.rightLine || '', { caseSensitive: true, ignoreWhitespace: false });
       const highlightedRight = highlightJSONDifference(op.rightLine || '', op.line, { caseSensitive: true, ignoreWhitespace: false });
-      leftFullContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>\n`;
-      rightFullContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>\n`;
+      leftContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>`;
+      rightContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>`;
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'remove') {
-      // Line removed from left (exists in left, not in right) - Show in RED on left, empty on right
       const escapedLine = escapeHtml(op.line);
-      leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
-      // Add empty placeholder on right side to keep alignment
-      rightFullContent += `<div class="line-empty"><span class="line-number"></span></div>\n`;
+      leftContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>`;
+      rightContent += `<div class="line-empty"><span class="line-number"></span></div>`;
       leftLineNum++;
     } else if (op.type === 'add') {
-      // Line added to right (exists in right, not in left) - Show in GREEN on right, empty on left
       const escapedLine = escapeHtml(op.line);
-      // Add empty placeholder on left side to keep alignment
-      leftFullContent += `<div class="line-empty"><span class="line-number"></span></div>\n`;
-      rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      leftContent += `<div class="line-empty"><span class="line-number"></span></div>`;
+      rightContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>`;
       rightLineNum++;
     }
+  }
+
+  // Determine primary change type
+  let primaryType: 'added' | 'removed' | 'modified' = 'modified';
+  if (modifiedCount > 0) primaryType = 'modified';
+  else if (addedCount > 0 && removedCount > 0) primaryType = 'modified';
+  else if (addedCount > 0) primaryType = 'added';
+  else if (removedCount > 0) primaryType = 'removed';
+
+  // Create a single difference entry for the full document
+  differences.push({
+    path: 'Full Document',
+    leftValue: leftContent,
+    rightValue: rightContent,
+    type: primaryType,
   });
 
-  // Return a single difference containing the content
   return {
-    differences: [{
-      path: 'Full Document',
-      leftValue: leftFullContent,
-      rightValue: rightFullContent,
-      type: 'modified',
-    }],
+    differences,
     diffCount,
     statistics,
   };
@@ -622,7 +631,7 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
         const leftLine = leftLines[removeOp.leftIndex!];
 
         let bestMatch = -1;
-        let bestSimilarity = 0.5; // Lowered from 0.7 to 0.5 - better detection of whitespace-only changes
+        let bestSimilarity = 0.3; // Lowered from 0.5 to 0.3 - better detection of value changes
 
         for (let a = 0; a < adds.length; a++) {
           if (usedAdds.has(a)) continue;
@@ -631,10 +640,44 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
           const rightLine = rightLines[addOp.rightIndex!];
           const similarity = calculateSimilarity(leftLine, rightLine);
 
-          // Special handling: if lines are identical after removing whitespace, treat as high similarity
+          // Multi-level whitespace normalization for better modification detection
+
+          // Level 1: Basic whitespace normalization (collapse multiple spaces, trim ends)
           const leftTrimmed = leftLine.replace(/\s+/g, ' ').trim();
           const rightTrimmed = rightLine.replace(/\s+/g, ' ').trim();
-          const effectiveSimilarity = leftTrimmed === rightTrimmed ? 0.95 : similarity;
+          let effectiveSimilarity = leftTrimmed === rightTrimmed ? 0.95 : similarity;
+
+          // Level 2: Aggressive normalization - remove ALL whitespace inside JSON string values
+          // This handles: "name": "   gCrtULPQ   " vs "name": "gCrtULPQ"
+          const aggressiveNormalize = (line: string) => {
+            // Remove ALL whitespace inside quoted strings, not just trim edges
+            return line.replace(/":\s*"([^"]*)"/g, (_match, value) => {
+              // Remove all leading/trailing spaces from the value
+              const cleaned = value.replace(/^\s+|\s+$/g, '');
+              return '": "' + cleaned + '"';
+            }).replace(/\s+/g, ' ').trim();
+          };
+
+          const leftAggressive = aggressiveNormalize(leftLine);
+          const rightAggressive = aggressiveNormalize(rightLine);
+
+          // If identical after aggressive normalization, it's just whitespace differences
+          if (leftAggressive === rightAggressive) {
+            effectiveSimilarity = 0.95;
+          }
+
+          // 3. Third check: if both lines have the same JSON key, likely a modification
+          // This catches cases where the value changed but key is the same
+          const jsonKeyMatch = leftLine.match(/^\s*"([^"]+)"\s*:/);
+          if (jsonKeyMatch) {
+            const leftKey = jsonKeyMatch[1];
+            const rightKeyMatch = rightLine.match(/^\s*"([^"]+)"\s*:/);
+            if (rightKeyMatch && rightKeyMatch[1] === leftKey) {
+              // Same key found - boost similarity significantly
+              // This ensures it's treated as modification, not add/remove
+              effectiveSimilarity = Math.max(effectiveSimilarity, 0.65);
+            }
+          }
 
           if (effectiveSimilarity > bestSimilarity) {
             bestSimilarity = effectiveSimilarity;
@@ -1531,24 +1574,299 @@ function findDifferences(left: unknown, right: unknown, path: string, options: C
 }
 
 /**
+ * Prettifies and validates JSON with automatic syntax correction
+ * Returns formatted JSON with proper indentation and highlights all corrections made
+ */
+export function prettifyJSON(content: string): ValidationResult {
+  if (!content || content.trim() === '') {
+    return {
+      isValid: false,
+      errors: ['Content is empty'],
+      message: 'Please provide JSON content to prettify',
+    };
+  }
+
+  const corrections: string[] = [];
+  let correctedContent = content;
+
+  try {
+    // Remove BOM and zero-width characters
+    if (correctedContent.charCodeAt(0) === 0xFEFF) {
+      correctedContent = correctedContent.slice(1);
+      corrections.push('Removed BOM (Byte Order Mark)');
+    }
+    correctedContent = correctedContent.replace(/[\u200B-\u200D\uFEFF]/g, '');
+    if (correctedContent !== content && corrections.length === 0) {
+      corrections.push('Removed zero-width invisible characters');
+    }
+
+    // Try to parse as-is first
+    try {
+      const parsed = JSON.parse(correctedContent);
+
+      // Check if it's an object or array
+      if (typeof parsed !== 'object' || parsed === null) {
+        return {
+          isValid: false,
+          errors: ['JSON must be an object or array, not a primitive value'],
+          message: 'Invalid JSON structure',
+        };
+      }
+
+      // Successfully parsed - format it
+      const prettified = JSON.stringify(parsed, null, 2);
+      const lines = prettified.split('\n').length;
+      const sizeInKB = (new Blob([prettified]).size / 1024).toFixed(2);
+      const type = Array.isArray(parsed) ? 'Array' : 'Object';
+
+      return {
+        isValid: true,
+        errors: [],
+        message: corrections.length > 0
+          ? `Valid JSON (${type}, ${lines} lines, ${sizeInKB} KB) - ${corrections.length} correction(s) applied`
+          : `Valid JSON (${type}, ${lines} lines, ${sizeInKB} KB)`,
+        prettified,
+        corrections: corrections.length > 0 ? corrections : undefined,
+      };
+    } catch {
+      // Parsing failed - try to fix common issues
+
+      // 1. Fix trailing commas
+      const trailingCommaFixed = correctedContent
+        .replace(/,(\s*[}\]])/g, '$1');
+
+      if (trailingCommaFixed !== correctedContent) {
+        corrections.push('Removed trailing commas before closing brackets/braces');
+        correctedContent = trailingCommaFixed;
+      }
+
+      // 2. Fix missing quotes around keys (common JS object notation)
+      const unquotedKeyFixed = correctedContent
+        .replace(/(\{|,)\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+
+      if (unquotedKeyFixed !== correctedContent) {
+        corrections.push('Added quotes around unquoted object keys');
+        correctedContent = unquotedKeyFixed;
+      }
+
+      // 3. Fix single quotes to double quotes
+      const singleQuoteFixed = correctedContent
+        .replace(/'([^']*)'/g, '"$1"');
+
+      if (singleQuoteFixed !== correctedContent) {
+        corrections.push('Converted single quotes to double quotes');
+        correctedContent = singleQuoteFixed;
+      }
+
+      // 4. Fix missing commas between properties
+      const missingCommaFixed = correctedContent
+        .replace(/"\s*\n\s*"/g, '",\n"')
+        .replace(/}\s*\n\s*"/g, '},\n"')
+        .replace(/]\s*\n\s*"/g, '],\n"');
+
+      if (missingCommaFixed !== correctedContent) {
+        corrections.push('Added missing commas between properties');
+        correctedContent = missingCommaFixed;
+      }
+
+      // 5. Fix undefined/NaN/Infinity (not valid JSON)
+      const undefinedFixed = correctedContent
+        .replace(/:\s*undefined\s*([,}\]])/g, ':null$1')
+        .replace(/:\s*NaN\s*([,}\]])/g, ':null$1')
+        .replace(/:\s*Infinity\s*([,}\]])/g, ':null$1');
+
+      if (undefinedFixed !== correctedContent) {
+        corrections.push('Replaced undefined/NaN/Infinity with null');
+        correctedContent = undefinedFixed;
+      }
+
+      // 6. Fix comments (not valid in JSON)
+      const commentFixed = correctedContent
+        .replace(/\/\/[^\n]*/g, '')  // Single-line comments
+        .replace(/\/\*[\s\S]*?\*\//g, '');  // Multi-line comments
+
+      if (commentFixed !== correctedContent) {
+        corrections.push('Removed comments (JSON does not support comments)');
+        correctedContent = commentFixed;
+      }
+
+      // Try parsing again after corrections
+      try {
+        const parsed = JSON.parse(correctedContent);
+
+        if (typeof parsed !== 'object' || parsed === null) {
+          return {
+            isValid: false,
+            errors: ['JSON must be an object or array, not a primitive value'],
+            message: 'Invalid JSON structure',
+          };
+        }
+
+        const prettified = JSON.stringify(parsed, null, 2);
+        const lines = prettified.split('\n').length;
+        const sizeInKB = (new Blob([prettified]).size / 1024).toFixed(2);
+        const type = Array.isArray(parsed) ? 'Array' : 'Object';
+
+        return {
+          isValid: true,
+          errors: [],
+          message: `Valid JSON (${type}, ${lines} lines, ${sizeInKB} KB) - ${corrections.length} correction(s) applied`,
+          prettified,
+          corrections,
+        };
+      } catch (secondError) {
+        // Still failed after corrections
+        const errorMessage = secondError instanceof Error ? secondError.message : 'Unknown error';
+        return {
+          isValid: false,
+          errors: [errorMessage],
+          message: corrections.length > 0
+            ? `Invalid JSON (${corrections.length} correction(s) attempted but parsing still failed)`
+            : 'Invalid JSON',
+          corrections: corrections.length > 0 ? corrections : undefined,
+        };
+      }
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      isValid: false,
+      errors: [errorMessage],
+      message: 'Error processing JSON',
+      corrections: corrections.length > 0 ? corrections : undefined,
+    };
+  }
+}
+
+/**
+ * Prettifies and validates XML with proper indentation
+ * Returns formatted XML with proper indentation
+ */
+export function prettifyXML(content: string): ValidationResult {
+  if (!content || content.trim() === '') {
+    return {
+      isValid: false,
+      errors: ['Content is empty'],
+      message: 'Please provide XML content to prettify',
+    };
+  }
+
+  try {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(content, 'text/xml');
+    const parserError = xmlDoc.querySelector('parsererror');
+
+    if (parserError) {
+      return {
+        isValid: false,
+        errors: [parserError.textContent || 'XML parsing error'],
+        message: 'Invalid XML',
+      };
+    }
+
+    // Format XML with indentation
+    const serializer = new XMLSerializer();
+    let formatted = serializer.serializeToString(xmlDoc);
+
+    // Add proper indentation (2 spaces)
+    const PADDING = '  ';
+    const reg = /(>)(<)(\/*)/g;
+    formatted = formatted.replace(reg, '$1\n$2$3');
+
+    let pad = 0;
+    formatted = formatted.split('\n').map((node) => {
+      let indent = 0;
+      if (node.match(/.+<\/\w[^>]*>$/)) {
+        indent = 0;
+      } else if (node.match(/^<\/\w/)) {
+        if (pad !== 0) {
+          pad -= 1;
+        }
+      } else if (node.match(/^<\w([^>]*[^/])?>.*$/)) {
+        indent = 1;
+      } else {
+        indent = 0;
+      }
+
+      const padding = PADDING.repeat(pad);
+      pad += indent;
+
+      return padding + node;
+    }).join('\n');
+
+    const lines = formatted.split('\n').length;
+    const sizeInKB = (new Blob([formatted]).size / 1024).toFixed(2);
+    const rootElement = xmlDoc.documentElement.nodeName;
+
+    return {
+      isValid: true,
+      errors: [],
+      message: `Valid XML (${rootElement}, ${lines} lines, ${sizeInKB} KB)`,
+      prettified: formatted,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      isValid: false,
+      errors: [errorMessage],
+      message: 'Error processing XML',
+    };
+  }
+}
+
+/**
+ * Prettifies text with normalized line endings
+ * Returns text with consistent line endings
+ */
+export function prettifyText(content: string): ValidationResult {
+  if (!content || content.trim() === '') {
+    return {
+      isValid: false,
+      errors: ['Content is empty'],
+      message: 'Please provide text content to prettify',
+    };
+  }
+
+  try {
+    // Normalize line endings to \n
+    let formatted = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // Remove trailing whitespace from each line
+    formatted = formatted.split('\n').map(line => line.trimEnd()).join('\n');
+
+    // Remove trailing empty lines
+    formatted = formatted.replace(/\n+$/, '\n');
+
+    const lines = formatted.split('\n').length;
+    const sizeInKB = (new Blob([formatted]).size / 1024).toFixed(2);
+
+    return {
+      isValid: true,
+      errors: [],
+      message: `Text formatted (${lines} lines, ${sizeInKB} KB)`,
+      prettified: formatted,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      isValid: false,
+      errors: [errorMessage],
+      message: 'Error processing text',
+    };
+  }
+}
+
+/**
  * Downloads content as a file
  */
-export function downloadContent(content: string, filename: string, type: 'json' | 'xml' | 'txt'): void {
+export function downloadContent(content: string, filename: string): void {
   if (!content || content.trim() === '') {
     return;
   }
 
-  // Determine MIME type
-  const mimeTypes = {
-    json: 'application/json',
-    xml: 'application/xml',
-    txt: 'text/plain',
-  };
-
-  const mimeType = mimeTypes[type];
-
-  // Create blob and download
-  const blob = new Blob([content], { type: mimeType });
+  // Use application/octet-stream to force download without program association
+  // This ensures files open with default text editor, not browser
+  const blob = new Blob([content], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

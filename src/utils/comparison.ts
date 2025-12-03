@@ -397,7 +397,38 @@ function sortXMLAttributes(element: Element): void {
 }
 
 /**
- * Helper function to normalize XML by sorting attributes
+ * Sorts child elements of an XML element by tag name to enable order-independent comparison
+ * This allows <price> followed by <title> to match <title> followed by <price>
+ */
+function sortXMLElements(element: Element): void {
+  // First, recursively process all child elements
+  for (let i = 0; i < element.children.length; i++) {
+    sortXMLElements(element.children[i]);
+  }
+
+  // Then sort this element's immediate children by tag name
+  if (element.children.length > 1) {
+    // Collect all child elements with their nodes
+    const childElements: Element[] = Array.from(element.children);
+
+    // Sort by tag name (case-insensitive for better matching)
+    childElements.sort((a, b) => a.tagName.toLowerCase().localeCompare(b.tagName.toLowerCase()));
+
+    // Remove all children
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+
+    // Add children back in sorted order
+    childElements.forEach(child => {
+      element.appendChild(child);
+    });
+  }
+}
+
+/**
+ * Helper function to normalize XML by sorting attributes and child elements
+ * This enables order-independent comparison when ignoreAttributeOrder is enabled
  */
 function normalizeXMLAttributes(xmlString: string): string {
   try {
@@ -411,7 +442,10 @@ function normalizeXMLAttributes(xmlString: string): string {
     }
 
     if (doc.documentElement) {
+      // Sort attributes within each element
       sortXMLAttributes(doc.documentElement);
+      // Sort child elements by tag name for order-independent comparison
+      sortXMLElements(doc.documentElement);
     }
 
     // Serialize back to string
@@ -456,22 +490,68 @@ export function compareXML(
       };
     }
 
-    // When ignoreAttributeOrder is ON, normalize (sort) attributes
-    // When OFF, use original content for true attribute order comparison
-    let leftProcessed = leftContent;
-    let rightProcessed = rightContent;
+    // Split into lines for comparison
+    const leftLines = leftContent.split('\n');
+    const rightLines = rightContent.split('\n');
 
+    // When ignoreAttributeOrder is ON, we need special handling
     if (options.ignoreAttributeOrder) {
-      leftProcessed = normalizeXMLAttributes(leftContent);
-      rightProcessed = normalizeXMLAttributes(rightContent);
+      // Normalize both sides for order-independent comparison
+      const leftNormalized = normalizeXMLAttributes(leftContent);
+      const rightNormalized = normalizeXMLAttributes(rightContent);
+
+      // Check if normalized versions are identical
+      const normalizedLeftLines = leftNormalized.split('\n').map(l => l.trim()).filter(l => l);
+      const normalizedRightLines = rightNormalized.split('\n').map(l => l.trim()).filter(l => l);
+
+      if (normalizedLeftLines.join('') === normalizedRightLines.join('')) {
+        // Normalized versions are identical - documents are the same despite different order
+        return {
+          areEqual: true,
+          differences: [],
+          message: '',
+          statistics: { added: 0, removed: 0, modified: 0 },
+        };
+      }
+
+      // Documents are different - compare normalized versions line-by-line
+      // This will show only actual content differences, not reordering
+      const leftNormalizedLines = leftNormalized.split('\n');
+      const rightNormalizedLines = rightNormalized.split('\n');
+
+      const { differences, diffCount, statistics } = compareXMLLines(
+        leftNormalizedLines,
+        rightNormalizedLines,
+        leftNormalizedLines,  // Display normalized version when order is ignored
+        rightNormalizedLines, // Display normalized version when order is ignored
+        options
+      );
+
+      if (diffCount > 0) {
+        return {
+          areEqual: false,
+          differences,
+          message: `Found ${diffCount} line(s) with differences`,
+          statistics,
+        };
+      }
+
+      return {
+        areEqual: true,
+        differences: [],
+        message: '',
+        statistics: { added: 0, removed: 0, modified: 0 },
+      };
     }
 
-    // Split into lines for line-by-line comparison with context
-    const leftLines = leftProcessed.split('\n');
-    const rightLines = rightProcessed.split('\n');
-
-    // Do line-by-line comparison
-    const { differences, diffCount, statistics } = compareXMLLines(leftLines, rightLines, options);
+    // ignoreAttributeOrder is OFF - do normal line-by-line comparison
+    const { differences, diffCount, statistics } = compareXMLLines(
+      leftLines,
+      rightLines,
+      leftLines,
+      rightLines,
+      options
+    );
 
     if (diffCount > 0) {
       return {
@@ -645,7 +725,14 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
           // Level 1: Basic whitespace normalization (collapse multiple spaces, trim ends)
           const leftTrimmed = leftLine.replace(/\s+/g, ' ').trim();
           const rightTrimmed = rightLine.replace(/\s+/g, ' ').trim();
-          let effectiveSimilarity = leftTrimmed === rightTrimmed ? 0.95 : similarity;
+
+          // If lines are identical after basic normalization, skip this pairing entirely
+          // These shouldn't be matched as modifications - they're essentially the same
+          if (leftTrimmed === rightTrimmed) {
+            continue; // Skip to next remove
+          }
+
+          let effectiveSimilarity = similarity;
 
           // Level 2: Aggressive normalization - remove ALL whitespace inside JSON string values
           // This handles: "name": "   gCrtULPQ   " vs "name": "gCrtULPQ"
@@ -661,9 +748,9 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
           const leftAggressive = aggressiveNormalize(leftLine);
           const rightAggressive = aggressiveNormalize(rightLine);
 
-          // If identical after aggressive normalization, it's just whitespace differences
+          // If identical after aggressive normalization, skip this pairing
           if (leftAggressive === rightAggressive) {
-            effectiveSimilarity = 0.95;
+            continue; // Skip to next remove
           }
 
           // 3. Third check: if both lines have the same JSON key, likely a modification
@@ -676,6 +763,44 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
               // Same key found - boost similarity significantly
               // This ensures it's treated as modification, not add/remove
               effectiveSimilarity = Math.max(effectiveSimilarity, 0.65);
+            }
+          }
+
+          // 4. XML-specific check: if both lines have the same XML element/tag structure
+          // This catches cases where an XML attribute or content changed but structure is the same
+          const xmlTagMatch = leftLine.match(/<(\w+)[\s>]/);
+          if (xmlTagMatch) {
+            const leftTag = xmlTagMatch[1];
+            const rightTagMatch = rightLine.match(/<(\w+)[\s>]/);
+            if (rightTagMatch && rightTagMatch[1] === leftTag) {
+              // Same XML tag found - check for matching id attribute
+              const leftIdMatch = leftLine.match(/\sid="([^"]+)"/);
+              const rightIdMatch = rightLine.match(/\sid="([^"]+)"/);
+
+              if (leftIdMatch && rightIdMatch && leftIdMatch[1] === rightIdMatch[1]) {
+                // Same tag and same id attribute - very strong indication of modification
+                effectiveSimilarity = Math.max(effectiveSimilarity, 0.85);
+              } else if (leftIdMatch && rightIdMatch) {
+                // Same tag but different id - still likely same line position
+                effectiveSimilarity = Math.max(effectiveSimilarity, 0.70);
+              } else if (similarity > 0.5) {
+                // Same tag, no id attribute - only boost if already quite similar (>50%)
+                // This prevents matching completely different lines just because they have the same tag
+                // Increased from 0.4 to 0.5 to be more strict
+                effectiveSimilarity = Math.max(effectiveSimilarity, 0.65);
+              }
+            }
+          }
+
+          // 5. XML attribute-specific check: if both lines have the same attribute name
+          // This catches cases where only the attribute value changed
+          const xmlAttrMatch = leftLine.match(/(\w+)=/);
+          if (xmlAttrMatch) {
+            const leftAttr = xmlAttrMatch[1];
+            const rightAttrMatch = rightLine.match(/(\w+)=/);
+            if (rightAttrMatch && rightAttrMatch[1] === leftAttr) {
+              // Same attribute name found - boost similarity
+              effectiveSimilarity = Math.max(effectiveSimilarity, 0.60);
             }
           }
 
@@ -705,14 +830,37 @@ function computeDiff(leftLines: string[], rightLines: string[], options: Compari
         }
       }
 
-      // Add unmatched removes
+      // Add unmatched removes (but skip if identical to any unmatched add)
       for (let r = 0; r < removes.length; r++) {
         if (!usedRemoves.has(r)) {
-          processed.push(removes[r]);
+          const removeOp = removes[r];
+          const leftLine = leftLines[removeOp.leftIndex!];
+          const leftTrimmed = leftLine.replace(/\s+/g, ' ').trim();
+
+          // Check if this remove has an identical add
+          let hasIdenticalAdd = false;
+          for (let a = 0; a < adds.length; a++) {
+            if (!usedAdds.has(a)) {
+              const addOp = adds[a];
+              const rightLine = rightLines[addOp.rightIndex!];
+              const rightTrimmed = rightLine.replace(/\s+/g, ' ').trim();
+
+              if (leftTrimmed === rightTrimmed) {
+                hasIdenticalAdd = true;
+                usedAdds.add(a); // Mark this add as used so it won't be added either
+                break;
+              }
+            }
+          }
+
+          // Only add if no identical add was found
+          if (!hasIdenticalAdd) {
+            processed.push(removes[r]);
+          }
         }
       }
 
-      // Add unmatched adds
+      // Add unmatched adds (but skip if already used by identical check above)
       for (let a = 0; a < adds.length; a++) {
         if (!usedAdds.has(a)) {
           processed.push(adds[a]);
@@ -774,14 +922,20 @@ function calculateSimilarity(str1: string, str2: string): number {
  * Helper function to compare XML line by line with highlighting using LCS-based diff
  * Returns all lines with differences highlighted
  * Optimized for large files by showing only context around differences
+ * @param leftLinesForComparison - Normalized lines used for comparison logic
+ * @param rightLinesForComparison - Normalized lines used for comparison logic
+ * @param leftLinesOriginal - Original lines used for display (preserves user input order)
+ * @param rightLinesOriginal - Original lines used for display (preserves user input order)
  */
 function compareXMLLines(
-  leftLines: string[],
-  rightLines: string[],
+  leftLinesForComparison: string[],
+  rightLinesForComparison: string[],
+  leftLinesOriginal: string[],
+  rightLinesOriginal: string[],
   options: ComparisonOptions
 ): { differences: Difference[]; diffCount: number; statistics: { added: number; removed: number; modified: number } } {
-  // Use LCS-based diff algorithm
-  const diffOps = computeDiff(leftLines, rightLines, options);
+  // Use LCS-based diff algorithm on normalized lines for comparison
+  const diffOps = computeDiff(leftLinesForComparison, rightLinesForComparison, options);
 
   // Count statistics
   let addedCount = 0;
@@ -859,29 +1013,36 @@ function compareXMLLines(
     }
 
     if (op.type === 'keep') {
-      // Same line on both sides
-      const escapedLine = escapeHtml(op.line);
-      leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
-      rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
+      // Same line on both sides - use original lines for display
+      const leftOrigLine = op.leftIndex !== undefined ? leftLinesOriginal[op.leftIndex] : op.line;
+      const rightOrigLine = op.rightIndex !== undefined ? rightLinesOriginal[op.rightIndex] : op.line;
+      const escapedLeft = escapeHtml(leftOrigLine);
+      const escapedRight = escapeHtml(rightOrigLine);
+      leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLeft}</div>\n`;
+      rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedRight}</div>\n`;
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'modify') {
-      // Line modified (exists on both sides but different)
-      const highlightedLeft = highlightXMLDifference(op.line, op.rightLine || '', { caseSensitive: true, ignoreWhitespace: false });
-      const highlightedRight = highlightXMLDifference(op.rightLine || '', op.line, { caseSensitive: true, ignoreWhitespace: false });
+      // Line modified (exists on both sides but different) - use original lines for display
+      const leftOrigLine = op.leftIndex !== undefined ? leftLinesOriginal[op.leftIndex] : op.line;
+      const rightOrigLine = op.rightIndex !== undefined ? rightLinesOriginal[op.rightIndex] : (op.rightLine || '');
+      const highlightedLeft = highlightXMLDifference(leftOrigLine, rightOrigLine, { caseSensitive: options.caseSensitive ?? true, ignoreWhitespace: options.ignoreWhitespace ?? false });
+      const highlightedRight = highlightXMLDifference(rightOrigLine, leftOrigLine, { caseSensitive: options.caseSensitive ?? true, ignoreWhitespace: options.ignoreWhitespace ?? false });
       leftFullContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>\n`;
       rightFullContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>\n`;
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'remove') {
-      // Line removed from left (exists in left, not in right)
-      const escapedLine = escapeHtml(op.line);
+      // Line removed from left (exists in left, not in right) - use original lines for display
+      const leftOrigLine = op.leftIndex !== undefined ? leftLinesOriginal[op.leftIndex] : op.line;
+      const escapedLine = escapeHtml(leftOrigLine);
       leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
       // Don't add anything to right side for removed lines
       leftLineNum++;
     } else if (op.type === 'add') {
-      // Line added to right (exists in right, not in left)
-      const escapedLine = escapeHtml(op.line);
+      // Line added to right (exists in right, not in left) - use original lines for display
+      const rightOrigLine = op.rightIndex !== undefined ? rightLinesOriginal[op.rightIndex] : (op.rightLine || op.line);
+      const escapedLine = escapeHtml(rightOrigLine);
       // Don't add anything to left side for added lines
       rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
       rightLineNum++;
@@ -1228,7 +1389,7 @@ function compareTextLines(
   rightLines: string[],
   options: ComparisonOptions
 ): { differences: Difference[]; diffCount: number; statistics: { added: number; removed: number; modified: number } } {
-  // Use LCS-based diff algorithm
+  // Use LCS-based diff algorithm (text comparison doesn't need separate comparison/display lines)
   const diffOps = computeDiff(leftLines, rightLines, options);
 
   // Count statistics
@@ -1307,29 +1468,32 @@ function compareTextLines(
     }
 
     if (op.type === 'keep') {
-      // Same line on both sides
-      const escapedLine = escapeHtml(op.line);
+      // Same line on both sides - use original lines for display
+      const leftOrigLine = op.line;
+      const escapedLine = escapeHtml(leftOrigLine);
       leftFullContent += `<div class="line-same"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
       rightFullContent += `<div class="line-same"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'modify') {
       // Line modified (exists on both sides but different)
-      const highlightedLeft = highlightXMLDifference(op.line, op.rightLine || '', { caseSensitive: true, ignoreWhitespace: false });
-      const highlightedRight = highlightXMLDifference(op.rightLine || '', op.line, { caseSensitive: true, ignoreWhitespace: false });
+      const highlightedLeft = highlightXMLDifference(op.line, op.rightLine || '', { caseSensitive: options.caseSensitive ?? true, ignoreWhitespace: options.ignoreWhitespace ?? false });
+      const highlightedRight = highlightXMLDifference(op.rightLine || '', op.line, { caseSensitive: options.caseSensitive ?? true, ignoreWhitespace: options.ignoreWhitespace ?? false });
       leftFullContent += `<div class="line-modified"><span class="line-number">${leftLineNum}</span>${highlightedLeft}</div>\n`;
       rightFullContent += `<div class="line-modified"><span class="line-number">${rightLineNum}</span>${highlightedRight}</div>\n`;
       leftLineNum++;
       rightLineNum++;
     } else if (op.type === 'remove') {
       // Line removed from left (exists in left, not in right)
-      const escapedLine = escapeHtml(op.line);
+      const leftOrigLine = op.line;
+      const escapedLine = escapeHtml(leftOrigLine);
       leftFullContent += `<div class="line-removed"><span class="line-number">${leftLineNum}</span>${escapedLine}</div>\n`;
       // Don't add anything to right side for removed lines
       leftLineNum++;
     } else if (op.type === 'add') {
-      // Line added to right (exists in right, not in left)
-      const escapedLine = escapeHtml(op.line);
+      // Line added to right (exists in right, not in left) - use original lines for display
+      const rightOrigLine = op.rightLine || op.line;
+      const escapedLine = escapeHtml(rightOrigLine);
       // Don't add anything to left side for added lines
       rightFullContent += `<div class="line-added"><span class="line-number">${rightLineNum}</span>${escapedLine}</div>\n`;
       rightLineNum++;
@@ -1775,14 +1939,18 @@ export function prettifyXML(content: string): ValidationResult {
 
     let pad = 0;
     formatted = formatted.split('\n').map((node) => {
+      // Strip any existing leading whitespace to ensure consistent formatting
+      // This makes prettify idempotent (same result if run multiple times)
+      const trimmedNode = node.trimStart();
+
       let indent = 0;
-      if (node.match(/.+<\/\w[^>]*>$/)) {
+      if (trimmedNode.match(/.+<\/\w[^>]*>$/)) {
         indent = 0;
-      } else if (node.match(/^<\/\w/)) {
+      } else if (trimmedNode.match(/^<\/\w/)) {
         if (pad !== 0) {
           pad -= 1;
         }
-      } else if (node.match(/^<\w([^>]*[^/])?>.*$/)) {
+      } else if (trimmedNode.match(/^<\w([^>]*[^/])?>.*$/)) {
         indent = 1;
       } else {
         indent = 0;
@@ -1791,7 +1959,7 @@ export function prettifyXML(content: string): ValidationResult {
       const padding = PADDING.repeat(pad);
       pad += indent;
 
-      return padding + node;
+      return padding + trimmedNode;
     }).join('\n');
 
     const lines = formatted.split('\n').length;

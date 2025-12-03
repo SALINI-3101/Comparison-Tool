@@ -128,6 +128,10 @@ export default function ComparisonTool() {
   const [jsonLeftPrettified, setJsonLeftPrettified] = useState(false);
   const [jsonRightPrettified, setJsonRightPrettified] = useState(false);
 
+  // State to track prettification status for XML Compare
+  const [xmlLeftPrettified, setXmlLeftPrettified] = useState(false);
+  const [xmlRightPrettified, setXmlRightPrettified] = useState(false);
+
   // State for active tab - Initialize with saved value to prevent flicker
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -207,6 +211,8 @@ export default function ComparisonTool() {
   // Track previous values to detect manual content changes
   const prevJsonLeftRef = useRef(jsonCompareLeft);
   const prevJsonRightRef = useRef(jsonCompareRight);
+  const prevXmlLeftRef = useRef(xmlCompareLeft);
+  const prevXmlRightRef = useRef(xmlCompareRight);
 
   // Reset prettification flags when content is manually changed (not by prettify)
   useEffect(() => {
@@ -228,6 +234,25 @@ export default function ComparisonTool() {
       }
     }
   }, [jsonCompareRight, isInitialLoadComplete]);
+
+  // Reset prettification flags for XML when content is manually changed
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      if (xmlCompareLeft !== prevXmlLeftRef.current) {
+        setXmlLeftPrettified(false);
+        prevXmlLeftRef.current = xmlCompareLeft;
+      }
+    }
+  }, [xmlCompareLeft, isInitialLoadComplete]);
+
+  useEffect(() => {
+    if (isInitialLoadComplete) {
+      if (xmlCompareRight !== prevXmlRightRef.current) {
+        setXmlRightPrettified(false);
+        prevXmlRightRef.current = xmlCompareRight;
+      }
+    }
+  }, [xmlCompareRight, isInitialLoadComplete]);
 
   // State for results
   const [validationResult, setValidationResult] = useState<ValidationResult | undefined>(undefined);
@@ -1248,6 +1273,9 @@ export default function ComparisonTool() {
     setXmlCompareLeft('');
     setXmlCompareRight('');
     setXmlComparisonResult(undefined);
+    // Reset prettification flags
+    setXmlLeftPrettified(false);
+    setXmlRightPrettified(false);
     // Reset XML toggles to defaults: Only Case Sensitive ON, all others OFF
     setXmlIgnoreWhitespace(false);
     setXmlCaseSensitive(true);
@@ -1541,7 +1569,12 @@ export default function ComparisonTool() {
                 <RefreshIcon />
                 Reset
               </ActionButton>
-              <ActionButton $variant="primary" onClick={handleCompareXML} disabled={!xmlCompareLeft || !xmlCompareRight}>
+              <ActionButton
+                $variant="primary"
+                onClick={handleCompareXML}
+                disabled={!xmlCompareLeft || !xmlCompareRight || !xmlLeftPrettified || !xmlRightPrettified}
+                title={!xmlLeftPrettified || !xmlRightPrettified ? "Prettify both sides first" : "Compare XML"}
+              >
                 <CompareIcon />
                 Spot Differences
               </ActionButton>
@@ -1568,6 +1601,8 @@ export default function ComparisonTool() {
                     const result = prettifyXML(xmlCompareLeft);
                     if (result.isValid && result.prettified) {
                       setXmlCompareLeft(result.prettified);
+                      prevXmlLeftRef.current = result.prettified; // Update ref to prevent useEffect from resetting flag
+                      setXmlLeftPrettified(true);
                       showSuccess('Prettified', 'XML formatted successfully');
                     } else {
                       showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
@@ -1617,6 +1652,8 @@ export default function ComparisonTool() {
                     const result = prettifyXML(xmlCompareRight);
                     if (result.isValid && result.prettified) {
                       setXmlCompareRight(result.prettified);
+                      prevXmlRightRef.current = result.prettified; // Update ref to prevent useEffect from resetting flag
+                      setXmlRightPrettified(true);
                       showSuccess('Prettified', 'XML formatted successfully');
                     } else {
                       showError('Prettify Failed', result.errors[0] || 'Unable to prettify');
